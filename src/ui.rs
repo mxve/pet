@@ -2,26 +2,25 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::Color;
 use ratatui::symbols::line::THICK_HORIZONTAL;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, LineGauge};
 
-use crate::app::App;
+use crate::app::{ACTIONS, App};
 use crate::pet::{self, Mood};
-use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT};
+use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 
 const CARD_WIDTH: u16 = 49;
 const CARD_HEIGHT: u16 = 13;
 const CARD_PADDING: u16 = 3;
 
 const NAME: &str = "Mochi";
-const HELP: &str = " f feed | p pet | y play | q quit ";
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(LAVENDER)
         .title(Line::from(" pet ").centered())
-        .title_bottom(Line::styled(HELP, MUTED).centered());
+        .title_bottom(help().centered());
     let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT);
     let inside = card.inner(area);
     frame.render_widget(card, area);
@@ -56,6 +55,23 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(bar("Food    ", stats.food, PEACH), food);
     frame.render_widget(bar("Joy     ", stats.joy, PINK), joy);
     frame.render_widget(bar("Energy  ", stats.energy, SKY), energy);
+}
+
+fn help() -> Line<'static> {
+    let keys = ACTIONS
+        .iter()
+        .map(|action| (action.key, action.label))
+        .chain([('q', "quit")]);
+    let mut spans = vec![Span::raw(" ")];
+    for (index, (key, label)) in keys.enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" | ", MUTED));
+        }
+        spans.push(Span::styled(key.to_string(), YELLOW));
+        spans.push(Span::styled(format!(" {label}"), MUTED));
+    }
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 fn mood_status(mood: Mood) -> (&'static str, Color) {

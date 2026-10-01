@@ -5,14 +5,56 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::pet::{Mood, Pet, Stats};
 use crate::species::{Clip, Species};
 
-const MESSAGE_TIME: Duration = Duration::from_millis(1500);
+pub struct Action {
+    pub key: char,
+    pub label: &'static str,
+    pub clip: Clip,
+    pub effect: Stats,
+    pub message: &'static str,
+}
+
+pub const ACTIONS: &[Action] = &[
+    Action {
+        key: 'f',
+        label: "feed",
+        clip: Clip::Eat,
+        effect: Stats {
+            food: 30.0,
+            joy: 2.0,
+            energy: 0.0,
+        },
+        message: "munches happily",
+    },
+    Action {
+        key: 'p',
+        label: "pet",
+        clip: Clip::Pet,
+        effect: Stats {
+            food: 0.0,
+            joy: 15.0,
+            energy: 0.0,
+        },
+        message: "loves the attention",
+    },
+    Action {
+        key: 'y',
+        label: "play",
+        clip: Clip::Play,
+        effect: Stats {
+            food: -5.0,
+            joy: 25.0,
+            energy: -10.0,
+        },
+        message: "bounces around",
+    },
+];
 
 pub struct App {
     pub pet: Pet,
     pub species: Species,
     pub clock: Duration,
     pub quit: bool,
-    acting: Option<(&'static str, Duration)>,
+    acting: Option<(&'static Action, Duration)>,
     speed: f32,
 }
 
@@ -29,6 +71,9 @@ impl App {
     }
 
     pub fn frame(&self) -> &str {
+        if let Some((action, elapsed)) = self.acting {
+            return self.species.animation(action.clip).frame_at(elapsed);
+        }
         let clip = match self.pet.mood() {
             Mood::Hungry | Mood::Bored | Mood::Tired => Clip::Sad,
             Mood::Content => Clip::Idle,
@@ -38,15 +83,17 @@ impl App {
     }
 
     pub fn message(&self) -> Option<&'static str> {
-        self.acting.map(|(message, _)| message)
+        self.acting.map(|(action, _)| action.message)
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
         if is_quit(key) {
             self.quit = true;
-        } else if let Some((effect, message)) = action(key.code) {
-            self.pet.apply(effect);
-            self.acting = Some((message, MESSAGE_TIME));
+        } else if let KeyCode::Char(character) = key.code
+            && let Some(action) = ACTIONS.iter().find(|action| action.key == character)
+        {
+            self.pet.apply(action.effect);
+            self.acting = Some((action, Duration::ZERO));
         }
     }
 
@@ -55,7 +102,8 @@ impl App {
         self.pet.tick(elapsed.mul_f32(self.speed));
         self.acting = self
             .acting
-            .and_then(|(message, left)| Some((message, left.checked_sub(elapsed)?)));
+            .map(|(action, played)| (action, played + elapsed))
+            .filter(|(action, played)| *played < self.species.animation(action.clip).duration());
     }
 }
 
@@ -67,32 +115,17 @@ fn is_quit(key: KeyEvent) -> bool {
     }
 }
 
-fn action(code: KeyCode) -> Option<(Stats, &'static str)> {
-    match code {
-        KeyCode::Char('f') => Some((
-            Stats {
-                food: 30.0,
-                joy: 2.0,
-                energy: 0.0,
-            },
-            "munches happily",
-        )),
-        KeyCode::Char('p') => Some((
-            Stats {
-                food: 0.0,
-                joy: 15.0,
-                energy: 0.0,
-            },
-            "loves the attention",
-        )),
-        KeyCode::Char('y') => Some((
-            Stats {
-                food: -5.0,
-                joy: 25.0,
-                energy: -10.0,
-            },
-            "bounces around",
-        )),
-        _ => None,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::species;
+
+    #[test]
+    fn an_action_plays_once_then_ends() {
+        let mut app = App::new(species::builtin().remove(0), 1.0);
+        app.on_key(KeyEvent::from(KeyCode::Char('f')));
+        assert_eq!(app.message(), Some("munches happily"));
+        app.tick(Duration::from_secs(60));
+        assert_eq!(app.message(), None);
     }
 }

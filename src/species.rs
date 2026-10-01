@@ -16,6 +16,9 @@ pub enum Clip {
     Idle,
     Happy,
     Sad,
+    Eat,
+    Pet,
+    Play,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +39,15 @@ impl Animation {
             self.sequence[step % self.sequence.len()]
         };
         &self.frames[index]
+    }
+
+    pub fn duration(&self) -> Duration {
+        let steps = if self.sequence.is_empty() {
+            self.frames.len()
+        } else {
+            self.sequence.len()
+        };
+        Duration::from_millis(self.frame_ms) * steps as u32
     }
 
     fn problem(&self) -> Option<&'static str> {
@@ -161,7 +173,7 @@ mod tests {
 
     #[test]
     fn cat_is_measured_by_its_largest_frame() {
-        assert_eq!(builtin()[0].size(), (7, 4));
+        assert_eq!(builtin()[0].size(), (13, 4));
     }
 
     #[test]

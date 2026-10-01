@@ -47,6 +47,10 @@ impl Pet {
         }
     }
 
+    pub fn apply(&mut self, effect: Stats) {
+        self.stats = self.stats.shifted(effect);
+    }
+
     pub fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
         self.stats = self.stats.shifted(AWAKE_RATE_PER_HOUR.scaled(hours));
@@ -71,5 +75,16 @@ mod tests {
                 energy: 0.0
             }
         );
+    }
+
+    #[test]
+    fn feeding_a_full_pet_stays_full() {
+        let mut pet = Pet::new();
+        pet.apply(Stats {
+            food: 30.0,
+            joy: 0.0,
+            energy: 0.0,
+        });
+        assert_eq!(pet.stats.food, FULL);
     }
 }

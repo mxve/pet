@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 pub const FULL: f32 = 100.0;
+pub const LOW: f32 = 25.0;
+const HIGH: f32 = 70.0;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
     joy: -6.0,
@@ -32,6 +34,15 @@ impl Stats {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mood {
+    Hungry,
+    Bored,
+    Tired,
+    Content,
+    Happy,
+}
+
 pub struct Pet {
     pub stats: Stats,
 }
@@ -54,6 +65,22 @@ impl Pet {
     pub fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
         self.stats = self.stats.shifted(AWAKE_RATE_PER_HOUR.scaled(hours));
+    }
+
+    pub fn mood(&self) -> Mood {
+        let Stats { food, joy, energy } = self.stats;
+        let lowest = food.min(joy).min(energy);
+        if lowest >= HIGH {
+            Mood::Happy
+        } else if lowest >= LOW {
+            Mood::Content
+        } else if lowest == food {
+            Mood::Hungry
+        } else if lowest == joy {
+            Mood::Bored
+        } else {
+            Mood::Tired
+        }
     }
 }
 
@@ -86,5 +113,21 @@ mod tests {
             energy: 0.0,
         });
         assert_eq!(pet.stats.food, FULL);
+    }
+
+    #[test]
+    fn mood_follows_the_lowest_stat() {
+        let mut pet = Pet::new();
+        assert_eq!(pet.mood(), Mood::Happy);
+        pet.stats.joy = 50.0;
+        assert_eq!(pet.mood(), Mood::Content);
+        pet.stats.energy = 20.0;
+        pet.stats.food = 10.0;
+        assert_eq!(pet.mood(), Mood::Hungry);
+        pet.stats.food = 30.0;
+        assert_eq!(pet.mood(), Mood::Tired);
+        pet.stats.joy = 20.0;
+        pet.stats.energy = 20.0;
+        assert_eq!(pet.mood(), Mood::Bored);
     }
 }

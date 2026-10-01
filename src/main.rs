@@ -3,7 +3,7 @@ mod pet;
 use std::io;
 use std::time::{Duration, Instant};
 
-use pet::{Pet, Stats};
+use pet::{Mood, Pet, Stats};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Style};
@@ -20,6 +20,8 @@ const CARD_PADDING: u16 = 3;
 const PINK: Color = Color::Rgb(0xf5, 0xc2, 0xe7);
 const PEACH: Color = Color::Rgb(0xfa, 0xb3, 0x87);
 const SKY: Color = Color::Rgb(0x89, 0xdc, 0xeb);
+const MINT: Color = Color::Rgb(0xa6, 0xe3, 0xa1);
+const ROSE: Color = Color::Rgb(0xf3, 0x8b, 0xa8);
 const LAVENDER: Color = Color::Rgb(0xb4, 0xbe, 0xfe);
 const TEXT: Color = Color::Rgb(0xcd, 0xd6, 0xf4);
 const MUTED: Color = Color::Rgb(0x6c, 0x70, 0x86);
@@ -151,17 +153,28 @@ fn draw(frame: &mut Frame, pet: &Pet, clock: Duration, message: Option<&str>) {
     let area = centered(stage, cat.width() as u16, cat.height() as u16);
     frame.render_widget(cat, area);
 
-    if let Some(message) = message {
-        let line = Line::styled(format!("{NAME} {message}."), TEXT).centered();
-        frame.render_widget(line, status);
-    }
+    let (message, color) =
+        message.map_or_else(|| mood_status(pet.mood()), |message| (message, TEXT));
+    let line = Line::styled(format!("{NAME} {message}."), color).centered();
+    frame.render_widget(line, status);
 
     frame.render_widget(bar("Food    ", pet.stats.food, PEACH), food);
     frame.render_widget(bar("Joy     ", pet.stats.joy, PINK), joy);
     frame.render_widget(bar("Energy  ", pet.stats.energy, SKY), energy);
 }
 
+fn mood_status(mood: Mood) -> (&'static str, Color) {
+    match mood {
+        Mood::Hungry => ("is hungry", ROSE),
+        Mood::Bored => ("is bored", ROSE),
+        Mood::Tired => ("is sleepy", ROSE),
+        Mood::Content => ("is doing fine", TEXT),
+        Mood::Happy => ("is happy", MINT),
+    }
+}
+
 fn bar(label: &'static str, value: f32, color: Color) -> LineGauge<'static> {
+    let color = if value < pet::LOW { ROSE } else { color };
     LineGauge::default()
         .label(Line::styled(label, TEXT))
         .ratio(f64::from(value / pet::FULL))

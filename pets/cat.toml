@@ -1,8 +1,8 @@
 name = "Cat"
 color = "#f5c2e7"
 
-[accents]
-"^" = "#f38ba8"
+[colors]
+1 = "#f38ba8"
 
 [clips.idle]
 frame_ms = 400
@@ -11,11 +11,11 @@ frames = [
 '''
  /\_/\
 ( o.o )
- > ^ <
+ > ^1^^^0 <
 ''',
 '''
  /\_/\
 ( -.- )
- > ^ <
+ > ^1^^^0 <
 ''',
 ]

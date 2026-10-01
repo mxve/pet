@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use ratatui::style::Color;
-use ratatui::text::Text;
+use ratatui::text::{Line, Span, Text};
 use serde::Deserialize;
 
 use crate::Result;
 
 const BUILTIN: [&str; 1] = [include_str!("../pets/cat.toml")];
+const ESCAPE: char = '^';
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,19 +59,32 @@ pub struct Species {
     pub name: String,
     pub color: Color,
     #[serde(default)]
-    pub accents: HashMap<char, Color>,
+    colors: HashMap<char, Color>,
     clips: HashMap<Clip, Animation>,
 }
 
 impl Species {
     pub fn parse(source: &str) -> Result<Species> {
         let species: Species = toml::from_str(source)?;
+        let name = &species.name;
         if !species.clips.contains_key(&Clip::Idle) {
-            return Err(format!("{} has no idle clip", species.name).into());
+            return Err(format!("{name} has no idle clip").into());
+        }
+        if let Some(code) = species
+            .colors
+            .keys()
+            .find(|code| !matches!(code, '1'..='9'))
+        {
+            return Err(format!("{name} defines color {code:?}, only 1 to 9 are allowed").into());
         }
         for (clip, animation) in &species.clips {
             if let Some(problem) = animation.problem() {
-                return Err(format!("{} clip {clip:?} {problem}", species.name).into());
+                return Err(format!("{name} clip {clip:?} {problem}").into());
+            }
+            for line in animation.frames.iter().flat_map(|frame| frame.lines()) {
+                species
+                    .paint_line(line)
+                    .map_err(|problem| format!("{name} clip {clip:?} {problem}"))?;
             }
         }
         Ok(species)
@@ -80,11 +94,40 @@ impl Species {
         self.clips.get(&clip).unwrap_or(&self.clips[&Clip::Idle])
     }
 
+    pub fn paint(&self, art: &str) -> Text<'static> {
+        art.lines()
+            .map(|line| self.paint_line(line).expect("frames are checked on parse"))
+            .collect()
+    }
+
+    fn paint_line(&self, line: &str) -> std::result::Result<Line<'static>, String> {
+        let mut color = self.color;
+        let mut spans = Vec::new();
+        let mut characters = line.chars();
+        while let Some(character) = characters.next() {
+            if character != ESCAPE {
+                spans.push(Span::styled(character.to_string(), color));
+                continue;
+            }
+            match characters.next() {
+                Some(ESCAPE) => spans.push(Span::styled(ESCAPE.to_string(), color)),
+                Some('0') => color = self.color,
+                Some(code) => {
+                    color = *self.colors.get(&code).ok_or_else(|| {
+                        format!("uses ^{code}, which has no color (write ^^ for a plain ^)")
+                    })?;
+                }
+                None => return Err("has a line ending in a lone ^".into()),
+            }
+        }
+        Ok(Line::from(spans))
+    }
+
     pub fn size(&self) -> (u16, u16) {
         self.clips
             .values()
             .flat_map(|animation| &animation.frames)
-            .map(Text::raw)
+            .map(|frame| self.paint(frame))
             .fold((0, 0), |(width, height), text| {
                 (
                     width.max(text.width() as u16),
@@ -129,4 +172,49 @@ mod tests {
         let at = |millis| animation.frame_at(Duration::from_millis(millis));
         assert_eq!([at(0), at(150), at(250), at(300)], ["a", "a", "b", "a"]);
     }
+
+    #[test]
+    fn escapes_switch_colors_until_reset_or_line_end() {
+        let species = Species::parse(SAMPLE).unwrap();
+        let painted: Vec<_> = species
+            .paint("a^1b^0c^1d\ne^^")
+            .iter()
+            .flat_map(|line| line.spans.clone())
+            .map(|span| (span.content.into_owned(), span.style.fg.unwrap()))
+            .collect();
+        let body = Color::Rgb(1, 1, 1);
+        let red = Color::Rgb(2, 2, 2);
+        let expected = [
+            ("a", body),
+            ("b", red),
+            ("c", body),
+            ("d", red),
+            ("e", body),
+            ("^", body),
+        ];
+        assert_eq!(
+            painted,
+            expected.map(|(text, color)| (text.to_string(), color))
+        );
+    }
+
+    #[test]
+    fn unknown_and_dangling_escapes_are_rejected() {
+        for art in ["^2", "^x", "a^"] {
+            let source = SAMPLE.replace("a^1b", art);
+            assert!(Species::parse(&source).is_err(), "{art} was accepted");
+        }
+    }
+
+    const SAMPLE: &str = r##"
+name = "Sample"
+color = "#010101"
+
+[colors]
+1 = "#020202"
+
+[clips.idle]
+frame_ms = 100
+frames = ["a^1b"]
+"##;
 }

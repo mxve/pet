@@ -2,12 +2,12 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::Color;
 use ratatui::symbols::line::THICK_HORIZONTAL;
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType, LineGauge};
 
 use crate::app::App;
 use crate::pet::{self, Mood};
-use crate::species::{Clip, Species};
+use crate::species::Clip;
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT};
 
 const CARD_WIDTH: u16 = 49;
@@ -41,7 +41,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     let species = &app.species;
     let (width, height) = species.size();
-    let art = colored(species, species.animation(Clip::Idle).frame_at(app.clock));
+    let art = species.paint(species.animation(Clip::Idle).frame_at(app.clock));
     let [art_area] = Layout::vertical([Constraint::Length(art.height() as u16)])
         .flex(Flex::End)
         .areas(centered(stage, width, height));
@@ -57,23 +57,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(bar("Food    ", stats.food, PEACH), food);
     frame.render_widget(bar("Joy     ", stats.joy, PINK), joy);
     frame.render_widget(bar("Energy  ", stats.energy, SKY), energy);
-}
-
-fn colored<'a>(species: &Species, art: &'a str) -> Text<'a> {
-    let color = |character| {
-        species
-            .accents
-            .get(&character)
-            .copied()
-            .unwrap_or(species.color)
-    };
-    art.lines()
-        .map(|line| {
-            line.chars()
-                .map(|character| Span::styled(character.to_string(), color(character)))
-                .collect::<Line>()
-        })
-        .collect()
 }
 
 fn mood_status(mood: Mood) -> (&'static str, Color) {

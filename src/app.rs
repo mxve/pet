@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::pet::{Pet, Stats};
-use crate::species::Species;
+use crate::pet::{Mood, Pet, Stats};
+use crate::species::{Clip, Species};
 
 const MESSAGE_TIME: Duration = Duration::from_millis(1500);
 
@@ -26,6 +26,15 @@ impl App {
             acting: None,
             speed,
         }
+    }
+
+    pub fn frame(&self) -> &str {
+        let clip = match self.pet.mood() {
+            Mood::Hungry | Mood::Bored | Mood::Tired => Clip::Sad,
+            Mood::Content => Clip::Idle,
+            Mood::Happy => Clip::Happy,
+        };
+        self.species.animation(clip).frame_at(self.clock)
     }
 
     pub fn message(&self) -> Option<&'static str> {

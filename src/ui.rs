@@ -7,7 +7,6 @@ use ratatui::widgets::{Block, BorderType, LineGauge};
 
 use crate::app::App;
 use crate::pet::{self, Mood};
-use crate::species::Clip;
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT};
 
 const CARD_WIDTH: u16 = 49;
@@ -41,7 +40,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     let species = &app.species;
     let (width, height) = species.size();
-    let art = species.paint(species.animation(Clip::Idle).frame_at(app.clock));
+    let art = species.paint(app.frame());
     let [art_area] = Layout::vertical([Constraint::Length(art.height() as u16)])
         .flex(Flex::End)
         .areas(centered(stage, width, height));

@@ -14,6 +14,8 @@ const ESCAPE: char = '^';
 #[serde(rename_all = "snake_case")]
 pub enum Clip {
     Idle,
+    Happy,
+    Sad,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,7 +161,7 @@ mod tests {
 
     #[test]
     fn cat_is_measured_by_its_largest_frame() {
-        assert_eq!(builtin()[0].size(), (7, 3));
+        assert_eq!(builtin()[0].size(), (7, 4));
     }
 
     #[test]

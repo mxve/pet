@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 pub const FULL: f32 = 100.0;
 pub const LOW: f32 = 25.0;
 const HIGH: f32 = 70.0;
@@ -14,7 +16,7 @@ const ASLEEP_RATE_PER_HOUR: Stats = Stats {
     energy: 25.0,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
     pub food: f32,
     pub joy: f32,
@@ -49,6 +51,7 @@ pub enum Mood {
     Happy,
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pet {
     pub stats: Stats,
     pub asleep: bool,

@@ -59,9 +59,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(species: Species, speed: f32) -> App {
+    pub fn new(pet: Pet, species: Species, speed: f32) -> App {
         App {
-            pet: Pet::new(),
+            pet,
             species,
             clock: Duration::ZERO,
             quit: false,
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn an_action_plays_once_then_ends() {
-        let mut app = App::new(species::builtin().remove(0), 1.0);
+        let mut app = App::new(Pet::new(), species::builtin().remove(0), 1.0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
         assert_eq!(app.message(), Some("munches happily"));
         app.tick(Duration::from_secs(60));

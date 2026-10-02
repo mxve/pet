@@ -49,9 +49,14 @@ pub const ACTIONS: &[Action] = &[
     },
 ];
 
+pub enum Screen {
+    Home,
+}
+
 pub struct App {
     pub pet: Pet,
     pub species: Species,
+    pub screen: Screen,
     pub clock: Duration,
     pub quit: bool,
     acting: Option<(&'static Action, Duration)>,
@@ -63,6 +68,7 @@ impl App {
         App {
             pet,
             species,
+            screen: Screen::Home,
             clock: Duration::ZERO,
             quit: false,
             acting: None,
@@ -88,16 +94,29 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
-        if is_quit(key) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.quit = true;
-        } else if key.code == KeyCode::Char('s') {
-            self.pet.asleep = !self.pet.asleep;
-            self.acting = None;
-        } else if let KeyCode::Char(character) = key.code
-            && let Some(action) = ACTIONS.iter().find(|action| action.key == character)
-        {
-            self.pet.apply(action.effect);
-            self.acting = Some((action, Duration::ZERO));
+            return;
+        }
+        match self.screen {
+            Screen::Home => self.on_home_key(key.code),
+        }
+    }
+
+    fn on_home_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            KeyCode::Char('s') => {
+                self.pet.asleep = !self.pet.asleep;
+                self.acting = None;
+            }
+            KeyCode::Char(character) => {
+                if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
+                    self.pet.apply(action.effect);
+                    self.acting = Some((action, Duration::ZERO));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -108,14 +127,6 @@ impl App {
             .acting
             .map(|(action, played)| (action, played + elapsed))
             .filter(|(action, played)| *played < self.species.animation(action.clip).duration());
-    }
-}
-
-fn is_quit(key: KeyEvent) -> bool {
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => true,
-        KeyCode::Char('c') => key.modifiers.contains(KeyModifiers::CONTROL),
-        _ => false,
     }
 }
 

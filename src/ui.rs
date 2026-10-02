@@ -5,7 +5,7 @@ use ratatui::symbols::line::THICK_HORIZONTAL;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, LineGauge};
 
-use crate::app::{ACTIONS, App};
+use crate::app::{ACTIONS, App, Screen};
 use crate::pet::{self, Mood};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 
@@ -16,6 +16,12 @@ const CARD_PADDING: u16 = 3;
 const NAME: &str = "Mochi";
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    match app.screen {
+        Screen::Home => draw_home(frame, app),
+    }
+}
+
+fn draw_home(frame: &mut Frame, app: &App) {
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(if app.pet.asleep { MUTED } else { LAVENDER })

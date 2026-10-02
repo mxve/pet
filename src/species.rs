@@ -19,6 +19,7 @@ pub enum Clip {
     Eat,
     Pet,
     Play,
+    Sleep,
 }
 
 #[derive(Debug, Deserialize)]

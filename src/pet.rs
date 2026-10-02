@@ -8,6 +8,11 @@ const AWAKE_RATE_PER_HOUR: Stats = Stats {
     joy: -6.0,
     energy: -5.0,
 };
+const ASLEEP_RATE_PER_HOUR: Stats = Stats {
+    food: -3.0,
+    joy: 0.0,
+    energy: 25.0,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Stats {
@@ -36,6 +41,7 @@ impl Stats {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mood {
+    Asleep,
     Hungry,
     Bored,
     Tired,
@@ -45,6 +51,7 @@ pub enum Mood {
 
 pub struct Pet {
     pub stats: Stats,
+    pub asleep: bool,
 }
 
 impl Pet {
@@ -55,22 +62,34 @@ impl Pet {
                 joy: FULL,
                 energy: FULL,
             },
+            asleep: false,
         }
     }
 
     pub fn apply(&mut self, effect: Stats) {
         self.stats = self.stats.shifted(effect);
+        self.asleep = false;
     }
 
     pub fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
-        self.stats = self.stats.shifted(AWAKE_RATE_PER_HOUR.scaled(hours));
+        let rate = if self.asleep {
+            ASLEEP_RATE_PER_HOUR
+        } else {
+            AWAKE_RATE_PER_HOUR
+        };
+        self.stats = self.stats.shifted(rate.scaled(hours));
+        if self.stats.energy >= FULL {
+            self.asleep = false;
+        }
     }
 
     pub fn mood(&self) -> Mood {
         let Stats { food, joy, energy } = self.stats;
         let lowest = food.min(joy).min(energy);
-        if lowest >= HIGH {
+        if self.asleep {
+            Mood::Asleep
+        } else if lowest >= HIGH {
             Mood::Happy
         } else if lowest >= LOW {
             Mood::Content
@@ -129,5 +148,18 @@ mod tests {
         pet.stats.joy = 20.0;
         pet.stats.energy = 20.0;
         assert_eq!(pet.mood(), Mood::Bored);
+    }
+
+    #[test]
+    fn sleeping_restores_energy_then_wakes() {
+        let mut pet = Pet::new();
+        pet.stats.energy = 10.0;
+        pet.asleep = true;
+        pet.tick(Duration::from_secs(3600));
+        assert_eq!(pet.stats.energy, 35.0);
+        assert_eq!(pet.mood(), Mood::Asleep);
+        pet.tick(Duration::from_secs(3600 * 3));
+        assert_eq!(pet.stats.energy, FULL);
+        assert!(!pet.asleep);
     }
 }

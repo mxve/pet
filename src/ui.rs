@@ -18,7 +18,7 @@ const NAME: &str = "Mochi";
 pub fn draw(frame: &mut Frame, app: &App) {
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(LAVENDER)
+        .border_style(if app.pet.asleep { MUTED } else { LAVENDER })
         .title(Line::from(" pet ").centered())
         .title_bottom(help().centered());
     let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT);
@@ -61,7 +61,7 @@ fn help() -> Line<'static> {
     let keys = ACTIONS
         .iter()
         .map(|action| (action.key, action.label))
-        .chain([('q', "quit")]);
+        .chain([('s', "sleep"), ('q', "quit")]);
     let mut spans = vec![Span::raw(" ")];
     for (index, (key, label)) in keys.enumerate() {
         if index > 0 {
@@ -76,6 +76,7 @@ fn help() -> Line<'static> {
 
 fn mood_status(mood: Mood) -> (&'static str, Color) {
     match mood {
+        Mood::Asleep => ("is fast asleep", TEXT),
         Mood::Hungry => ("is hungry", ROSE),
         Mood::Bored => ("is bored", ROSE),
         Mood::Tired => ("is sleepy", ROSE),

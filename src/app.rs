@@ -75,6 +75,7 @@ impl App {
             return self.species.animation(action.clip).frame_at(elapsed);
         }
         let clip = match self.pet.mood() {
+            Mood::Asleep => Clip::Sleep,
             Mood::Hungry | Mood::Bored | Mood::Tired => Clip::Sad,
             Mood::Content => Clip::Idle,
             Mood::Happy => Clip::Happy,
@@ -89,6 +90,9 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         if is_quit(key) {
             self.quit = true;
+        } else if key.code == KeyCode::Char('s') {
+            self.pet.asleep = !self.pet.asleep;
+            self.acting = None;
         } else if let KeyCode::Char(character) = key.code
             && let Some(action) = ACTIONS.iter().find(|action| action.key == character)
         {

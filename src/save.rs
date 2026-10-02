@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::Result;
 use crate::pet::Pet;
 
-fn path() -> Result<PathBuf> {
+pub fn path() -> Result<PathBuf> {
     let home = std::env::home_dir().ok_or("cannot find the home directory")?;
     Ok(home.join(".pet").join("save.toml"))
 }
@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn a_pet_survives_the_save_format() {
-        let mut pet = Pet::new();
+        let mut pet = Pet::new("Mochi", "Cat");
         pet.stats.food = 12.5;
         pet.asleep = true;
         let saved = toml::to_string(&pet).unwrap();

@@ -24,9 +24,16 @@ fn main() -> Result<()> {
             pet.advance(Duration::from_secs(away));
             pet
         }
-        None => Pet::new(),
+        None => Pet::new("Mochi", "Cat"),
     };
-    let mut app = App::new(pet, species::builtin().remove(0), speed());
+    let Some(species) = species::builtin()
+        .into_iter()
+        .find(|species| species.name == pet.species)
+    else {
+        let path = save::path()?;
+        return Err(format!("{}: unknown species \"{}\"", path.display(), pet.species).into());
+    };
+    let mut app = App::new(pet, species, speed());
     let result = run(&mut ratatui::init(), &mut app);
     ratatui::restore();
     save::store(&mut app.pet)?;

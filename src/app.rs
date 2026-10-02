@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn an_action_plays_once_then_ends() {
-        let mut app = App::new(Pet::new(), species::builtin().remove(0), 1.0);
+        let mut app = App::new(Pet::new("Mochi", "Cat"), species::builtin().remove(0), 1.0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
         assert_eq!(app.message(), Some("munches happily"));
         app.tick(Duration::from_secs(60));

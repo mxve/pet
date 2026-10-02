@@ -54,14 +54,18 @@ pub enum Mood {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pet {
+    pub name: String,
+    pub species: String,
     pub stats: Stats,
     pub asleep: bool,
     pub last_seen: u64,
 }
 
 impl Pet {
-    pub fn new() -> Pet {
+    pub fn new(name: &str, species: &str) -> Pet {
         Pet {
+            name: name.to_string(),
+            species: species.to_string(),
             stats: Stats {
                 food: FULL,
                 joy: FULL,
@@ -124,7 +128,7 @@ mod tests {
 
     #[test]
     fn decay_stops_at_zero() {
-        let mut pet = Pet::new();
+        let mut pet = Pet::new("Mochi", "Cat");
         pet.tick(Duration::from_secs(3600));
         assert_eq!(pet.stats.food, 92.0);
         pet.tick(Duration::from_secs(3600 * 1000));
@@ -140,7 +144,7 @@ mod tests {
 
     #[test]
     fn feeding_a_full_pet_stays_full() {
-        let mut pet = Pet::new();
+        let mut pet = Pet::new("Mochi", "Cat");
         pet.apply(Stats {
             food: 30.0,
             joy: 0.0,
@@ -151,7 +155,7 @@ mod tests {
 
     #[test]
     fn mood_follows_the_lowest_stat() {
-        let mut pet = Pet::new();
+        let mut pet = Pet::new("Mochi", "Cat");
         assert_eq!(pet.mood(), Mood::Happy);
         pet.stats.joy = 50.0;
         assert_eq!(pet.mood(), Mood::Content);
@@ -167,7 +171,7 @@ mod tests {
 
     #[test]
     fn sleeping_restores_energy_then_wakes() {
-        let mut pet = Pet::new();
+        let mut pet = Pet::new("Mochi", "Cat");
         pet.stats.energy = 10.0;
         pet.asleep = true;
         pet.tick(Duration::from_secs(3600));
@@ -181,7 +185,7 @@ mod tests {
     #[test]
     fn catching_up_matches_ticking_minute_by_minute() {
         let tired = || {
-            let mut pet = Pet::new();
+            let mut pet = Pet::new("Mochi", "Cat");
             pet.stats.energy = 10.0;
             pet.asleep = true;
             pet

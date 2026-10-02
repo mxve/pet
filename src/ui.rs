@@ -13,8 +13,6 @@ const CARD_WIDTH: u16 = 49;
 const CARD_HEIGHT: u16 = 13;
 const CARD_PADDING: u16 = 3;
 
-const NAME: &str = "Mochi";
-
 pub fn draw(frame: &mut Frame, app: &App) {
     match app.screen {
         Screen::Home => draw_home(frame, app),
@@ -22,10 +20,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn draw_home(frame: &mut Frame, app: &App) {
+    let title = format!(" {} the {} ", app.pet.name, app.species.name);
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(if app.pet.asleep { MUTED } else { LAVENDER })
-        .title(Line::from(" pet ").centered())
+        .title(Line::styled(title, app.species.color).centered())
         .title_bottom(help().centered());
     let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT);
     let inside = card.inner(area);
@@ -54,7 +53,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
     let (message, color) = app
         .message()
         .map_or_else(|| mood_status(app.pet.mood()), |message| (message, TEXT));
-    let line = Line::styled(format!("{NAME} {message}."), color).centered();
+    let line = Line::styled(format!("{} {message}.", app.pet.name), color).centered();
     frame.render_widget(line, status);
 
     let stats = app.pet.stats;

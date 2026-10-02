@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const FULL: f32 = 100.0;
 pub const LOW: f32 = 25.0;
 const HIGH: f32 = 70.0;
+const CATCH_UP_STEP: Duration = Duration::from_secs(60);
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
     joy: -6.0,
@@ -55,6 +56,7 @@ pub enum Mood {
 pub struct Pet {
     pub stats: Stats,
     pub asleep: bool,
+    pub last_seen: u64,
 }
 
 impl Pet {
@@ -66,6 +68,7 @@ impl Pet {
                 energy: FULL,
             },
             asleep: false,
+            last_seen: 0,
         }
     }
 
@@ -84,6 +87,15 @@ impl Pet {
         self.stats = self.stats.shifted(rate.scaled(hours));
         if self.stats.energy >= FULL {
             self.asleep = false;
+        }
+    }
+
+    pub fn advance(&mut self, elapsed: Duration) {
+        let mut left = elapsed;
+        while !left.is_zero() {
+            let step = left.min(CATCH_UP_STEP);
+            self.tick(step);
+            left -= step;
         }
     }
 
@@ -164,5 +176,23 @@ mod tests {
         pet.tick(Duration::from_secs(3600 * 3));
         assert_eq!(pet.stats.energy, FULL);
         assert!(!pet.asleep);
+    }
+
+    #[test]
+    fn catching_up_matches_ticking_minute_by_minute() {
+        let tired = || {
+            let mut pet = Pet::new();
+            pet.stats.energy = 10.0;
+            pet.asleep = true;
+            pet
+        };
+        let mut caught_up = tired();
+        caught_up.advance(Duration::from_secs(10 * 3600));
+        let mut ticked = tired();
+        for _ in 0..600 {
+            ticked.tick(Duration::from_secs(60));
+        }
+        assert_eq!(caught_up, ticked);
+        assert!(!caught_up.asleep);
     }
 }

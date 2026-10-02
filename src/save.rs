@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::Result;
 use crate::pet::Pet;
@@ -21,7 +22,14 @@ pub fn load() -> Result<Option<Pet>> {
     Ok(Some(pet))
 }
 
-pub fn store(pet: &Pet) -> Result<()> {
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+pub fn store(pet: &mut Pet) -> Result<()> {
+    pet.last_seen = now();
     let path = path()?;
     let temporary = path.with_extension("toml.tmp");
     if let Some(folder) = path.parent() {

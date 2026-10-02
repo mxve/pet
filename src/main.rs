@@ -18,11 +18,18 @@ const TICK: Duration = Duration::from_millis(100);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 
 fn main() -> Result<()> {
-    let pet = save::load()?.unwrap_or_else(Pet::new);
+    let pet = match save::load()? {
+        Some(mut pet) => {
+            let away = save::now().saturating_sub(pet.last_seen);
+            pet.advance(Duration::from_secs(away));
+            pet
+        }
+        None => Pet::new(),
+    };
     let mut app = App::new(pet, species::builtin().remove(0), speed());
     let result = run(&mut ratatui::init(), &mut app);
     ratatui::restore();
-    save::store(&app.pet)?;
+    save::store(&mut app.pet)?;
     result
 }
 
@@ -36,14 +43,14 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             && key.kind == KeyEventKind::Press
         {
             app.on_key(key);
-            save::store(&app.pet)?;
+            save::store(&mut app.pet)?;
             last_save = Instant::now();
         }
         let now = Instant::now();
         app.tick(now - last_tick);
         last_tick = now;
         if now - last_save >= AUTOSAVE_INTERVAL {
-            save::store(&app.pet)?;
+            save::store(&mut app.pet)?;
             last_save = now;
         }
     }

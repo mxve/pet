@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, BorderType, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen};
 use crate::pet::{self, Mood};
+use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 
 const CARD_WIDTH: u16 = 49;
@@ -15,22 +16,68 @@ const CARD_PADDING: u16 = 3;
 
 pub fn draw(frame: &mut Frame, app: &App) {
     match app.screen {
+        Screen::Adopt => draw_adopt(frame, app),
         Screen::Home => draw_home(frame, app),
     }
 }
 
+fn draw_adopt(frame: &mut Frame, app: &App) {
+    let species = app.chosen();
+    let title = Line::styled(" adopt a pet ", species.color);
+    let keys = [("<- ->", "choose"), ("enter", "adopt"), ("esc", "quit")];
+    let [stage, name, ..] = card(frame, title, LAVENDER, help(keys));
+
+    let art = species.animation(Clip::Idle).frame_at(app.clock);
+    draw_pet(frame, species, art, stage);
+
+    let line = Line::from(vec![
+        Span::styled("<  ", MUTED),
+        Span::styled(species.name.as_str(), species.color),
+        Span::styled("  >", MUTED),
+    ]);
+    frame.render_widget(line.centered(), name);
+}
+
 fn draw_home(frame: &mut Frame, app: &App) {
-    let title = format!(" {} the {} ", app.pet.name, app.species.name);
+    let Some(pet) = &app.pet else {
+        return;
+    };
+    let species = app.chosen();
+    let title = Line::styled(
+        format!(" {} the {} ", pet.name, species.name),
+        species.color,
+    );
+    let border = if pet.asleep { MUTED } else { LAVENDER };
+    let keys = ACTIONS
+        .iter()
+        .map(|action| (action.key, action.label))
+        .chain([('s', "sleep"), ('q', "quit")]);
+    let [stage, status, _, food, joy, energy, _] = card(frame, title, border, help(keys));
+
+    draw_pet(frame, species, app.frame(pet), stage);
+
+    let (message, color) = app
+        .message()
+        .map_or_else(|| mood_status(pet.mood()), |message| (message, TEXT));
+    let line = Line::styled(format!("{} {message}.", pet.name), color).centered();
+    frame.render_widget(line, status);
+
+    frame.render_widget(bar("Food    ", pet.stats.food, PEACH), food);
+    frame.render_widget(bar("Joy     ", pet.stats.joy, PINK), joy);
+    frame.render_widget(bar("Energy  ", pet.stats.energy, SKY), energy);
+}
+
+fn card(frame: &mut Frame, title: Line, border: Color, help: Line) -> [Rect; 7] {
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(if app.pet.asleep { MUTED } else { LAVENDER })
-        .title(Line::styled(title, app.species.color).centered())
-        .title_bottom(help().centered());
+        .border_style(border)
+        .title(title.centered())
+        .title_bottom(help.centered());
     let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT);
     let inside = card.inner(area);
     frame.render_widget(card, area);
 
-    let [stage, status, _, food, joy, energy, _] = Layout::vertical([
+    Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(1),
         Constraint::Length(1),
@@ -40,35 +87,21 @@ fn draw_home(frame: &mut Frame, app: &App) {
         Constraint::Length(1),
     ])
     .horizontal_margin(CARD_PADDING)
-    .areas(inside);
-
-    let species = &app.species;
-    let (width, height) = species.size();
-    let art = species.paint(app.frame());
-    let [art_area] = Layout::vertical([Constraint::Length(art.height() as u16)])
-        .flex(Flex::End)
-        .areas(centered(stage, width, height));
-    frame.render_widget(art, art_area);
-
-    let (message, color) = app
-        .message()
-        .map_or_else(|| mood_status(app.pet.mood()), |message| (message, TEXT));
-    let line = Line::styled(format!("{} {message}.", app.pet.name), color).centered();
-    frame.render_widget(line, status);
-
-    let stats = app.pet.stats;
-    frame.render_widget(bar("Food    ", stats.food, PEACH), food);
-    frame.render_widget(bar("Joy     ", stats.joy, PINK), joy);
-    frame.render_widget(bar("Energy  ", stats.energy, SKY), energy);
+    .areas(inside)
 }
 
-fn help() -> Line<'static> {
-    let keys = ACTIONS
-        .iter()
-        .map(|action| (action.key, action.label))
-        .chain([('s', "sleep"), ('q', "quit")]);
+fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) {
+    let (width, height) = species.size();
+    let art = species.paint(art);
+    let [area] = Layout::vertical([Constraint::Length(art.height() as u16)])
+        .flex(Flex::End)
+        .areas(centered(stage, width, height));
+    frame.render_widget(art, area);
+}
+
+fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
-    for (index, (key, label)) in keys.enumerate() {
+    for (index, (key, label)) in keys.into_iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(" | ", MUTED));
         }

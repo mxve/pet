@@ -8,7 +8,6 @@ mod ui;
 use std::time::{Duration, Instant};
 
 use app::App;
-use pet::Pet;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
@@ -18,26 +17,33 @@ const TICK: Duration = Duration::from_millis(100);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 
 fn main() -> Result<()> {
-    let pet = match save::load()? {
-        Some(mut pet) => {
-            let away = save::now().saturating_sub(pet.last_seen);
-            pet.advance(Duration::from_secs(away));
-            pet
-        }
-        None => Pet::new("Mochi", "Cat"),
-    };
-    let Some(species) = species::builtin()
-        .into_iter()
-        .find(|species| species.name == pet.species)
-    else {
-        let path = save::path()?;
-        return Err(format!("{}: unknown species \"{}\"", path.display(), pet.species).into());
-    };
-    let mut app = App::new(pet, species, speed());
+    let species = species::builtin();
+    let mut pet = save::load()?;
+    let mut choice = 0;
+    if let Some(pet) = &mut pet {
+        let known = species
+            .iter()
+            .position(|species| species.name == pet.species);
+        let Some(known) = known else {
+            let path = save::path()?;
+            return Err(format!("{}: unknown species \"{}\"", path.display(), pet.species).into());
+        };
+        choice = known;
+        let away = save::now().saturating_sub(pet.last_seen);
+        pet.advance(Duration::from_secs(away));
+    }
+    let mut app = App::new(pet, species, choice, speed());
     let result = run(&mut ratatui::init(), &mut app);
     ratatui::restore();
-    save::store(&mut app.pet)?;
+    store(&mut app)?;
     result
+}
+
+fn store(app: &mut App) -> Result<()> {
+    match &mut app.pet {
+        Some(pet) => save::store(pet),
+        None => Ok(()),
+    }
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
@@ -50,14 +56,14 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             && key.kind == KeyEventKind::Press
         {
             app.on_key(key);
-            save::store(&mut app.pet)?;
+            store(app)?;
             last_save = Instant::now();
         }
         let now = Instant::now();
         app.tick(now - last_tick);
         last_tick = now;
         if now - last_save >= AUTOSAVE_INTERVAL {
-            save::store(&mut app.pet)?;
+            store(app)?;
             last_save = now;
         }
     }

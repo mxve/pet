@@ -14,9 +14,12 @@ pub fn xp_bar(ratio: f32, width: u16, clock: Duration) -> Line<'static> {
     let width = usize::from(width);
     let filled = (ratio.clamp(0.0, 1.0) * width as f32).round() as usize;
     (0..width)
-        .map(|cell| match cell < filled {
-            true => sparkle(cell, width, clock),
-            false => Span::styled(EMPTY, MUTED),
+        .map(|cell| {
+            if cell < filled {
+                sparkle(cell, width, clock)
+            } else {
+                Span::styled(EMPTY, MUTED)
+            }
         })
         .collect()
 }

@@ -101,9 +101,9 @@ fn draw_home(frame: &mut Frame, app: &App) {
     let line = Line::styled(format!("{} {message}", pet.name), color).centered();
     frame.render_widget(line, status);
 
-    frame.render_widget(bar("Food    ", pet.stats.food, PEACH), food);
-    frame.render_widget(bar("Joy     ", pet.stats.joy, PINK), joy);
-    frame.render_widget(bar("Energy  ", pet.stats.energy, SKY), energy);
+    frame.render_widget(stat_bar("Food    ", pet.stats.food, PEACH), food);
+    frame.render_widget(stat_bar("Joy     ", pet.stats.joy, PINK), joy);
+    frame.render_widget(stat_bar("Energy  ", pet.stats.energy, SKY), energy);
 
     let [_, row] = card_rows(frame);
     let row = row.inner(Margin::new(CARD_PADDING + 1, 0));
@@ -116,8 +116,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
         Constraint::Length(label.width() as u16),
     ])
     .areas(row);
-    let ratio = level.ratio();
-    frame.render_widget(bar::xp_bar(ratio, track.width, app.clock), track);
+    frame.render_widget(bar::xp_bar(level.ratio(), track.width, app.clock), track);
     frame.render_widget(label, number);
 }
 
@@ -271,7 +270,7 @@ fn hint(key: String, label: &'static str, glowing: bool) -> [Span<'static>; 3] {
         None => [
             Span::styled(key, YELLOW),
             Span::raw(" "),
-            Span::styled(label, MUTED),
+            Span::styled(label, word),
         ],
     }
 }
@@ -312,7 +311,7 @@ fn mood_status(mood: Mood) -> (&'static str, Color) {
     }
 }
 
-fn bar(label: &'static str, value: f32, color: Color) -> LineGauge<'static> {
+fn stat_bar(label: &'static str, value: f32, color: Color) -> LineGauge<'static> {
     let color = if value < pet::LOW { ROSE } else { color };
     LineGauge::default()
         .label(Line::styled(label, TEXT))

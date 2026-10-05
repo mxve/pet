@@ -112,11 +112,28 @@ fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>) -> Line<
         if index > 0 {
             spans.push(Span::styled(" | ", MUTED));
         }
-        spans.push(Span::styled(key.to_string(), YELLOW));
-        spans.push(Span::styled(format!(" {label}"), MUTED));
+        spans.extend(hint(key.to_string(), label));
     }
     spans.push(Span::raw(" "));
     Line::from(spans)
+}
+
+fn hint(key: String, label: &'static str) -> [Span<'static>; 3] {
+    match label.find(&key) {
+        Some(at) => {
+            let end = at + key.len();
+            [
+                Span::styled(&label[..at], MUTED),
+                Span::styled(&label[at..end], YELLOW),
+                Span::styled(&label[end..], MUTED),
+            ]
+        }
+        None => [
+            Span::styled(key, YELLOW),
+            Span::raw(" "),
+            Span::styled(label, MUTED),
+        ],
+    }
 }
 
 fn mood_status(mood: Mood) -> (&'static str, Color) {

@@ -176,7 +176,8 @@ mod tests {
 
     #[test]
     fn cat_is_measured_by_its_largest_frame() {
-        assert_eq!(builtin()[0].size(), (12, 4));
+        let cat = builtin().into_iter().find(|species| species.name == "Cat");
+        assert_eq!(cat.unwrap().size(), (12, 4));
     }
 
     #[test]

@@ -184,8 +184,9 @@ mod tests {
 
     #[test]
     fn an_action_plays_once_then_ends() {
-        let pet = Pet::new("Mochi", "Cat");
-        let mut app = App::new(Some(pet), species::builtin(), 0, 1.0);
+        let species = species::builtin();
+        let pet = Pet::new("Mochi", &species[0].name);
+        let mut app = App::new(Some(pet), species, 0, 1.0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
         assert_eq!(app.message(), Some("munches happily"));
         app.tick(Duration::from_secs(60));
@@ -208,7 +209,7 @@ mod tests {
         ]);
         press(&[KeyCode::Char('q'), KeyCode::Char('f'), KeyCode::Backspace]);
         press(&[KeyCode::Enter]);
-        assert_eq!(app.pet, Some(Pet::new("q", "Cat")));
+        assert_eq!(app.pet, Some(Pet::new("q", &app.species[0].name)));
         assert!(matches!(app.screen, Screen::Home));
         assert!(!app.quit);
     }

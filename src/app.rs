@@ -68,12 +68,14 @@ pub struct App {
     pub clock: Duration,
     pub seed: u64,
     pub quit: bool,
+    #[cfg(debug_assertions)]
+    pub dev: bool,
     acting: Option<(&'static Action, Duration)>,
     speed: f32,
 }
 
 impl App {
-    pub fn new(pet: Option<Pet>, species: Vec<Species>, choice: usize, speed: f32) -> App {
+    pub fn new(pet: Option<Pet>, species: Vec<Species>, choice: usize) -> App {
         App {
             screen: if pet.is_some() {
                 Screen::Home
@@ -88,8 +90,10 @@ impl App {
             clock: Duration::ZERO,
             seed: RandomState::new().hash_one(0),
             quit: false,
+            #[cfg(debug_assertions)]
+            dev: false,
             acting: None,
-            speed,
+            speed: 1.0,
         }
     }
 
@@ -128,6 +132,10 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.quit = true;
+            return;
+        }
+        #[cfg(debug_assertions)]
+        if self.dev && self.on_dev_key(key) {
             return;
         }
         match self.screen {
@@ -193,6 +201,60 @@ impl App {
     }
 }
 
+#[cfg(debug_assertions)]
+mod dev {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::App;
+    use crate::pet::{FULL, Stats};
+
+    const SPEED: f32 = 600.0;
+    const SPEEDS: [f32; 5] = [1.0, 10.0, 60.0, 600.0, 3600.0];
+    const CHEAT_XP: u32 = 10;
+    const CHEAT_DRAIN: f32 = 25.0;
+
+    impl App {
+        pub fn start_dev(&mut self) {
+            self.dev = true;
+            self.speed = SPEED;
+        }
+
+        pub fn speed(&self) -> f32 {
+            self.speed
+        }
+
+        pub(super) fn on_dev_key(&mut self, key: KeyEvent) -> bool {
+            let control = key.modifiers.contains(KeyModifiers::CONTROL);
+            let alt = key.modifiers.contains(KeyModifiers::ALT);
+            if !control || alt {
+                return false;
+            }
+            if key.code == KeyCode::Char('t') {
+                let current = SPEEDS.iter().position(|speed| *speed == self.speed);
+                self.speed = SPEEDS[current.map_or(0, |index| (index + 1) % SPEEDS.len())];
+                return true;
+            }
+            let Some(pet) = &mut self.pet else {
+                return true;
+            };
+            let by = |food, joy, energy| Stats { food, joy, energy };
+            match key.code {
+                KeyCode::Char('x') => pet.xp += CHEAT_XP,
+                KeyCode::Char('l') => {
+                    let level = pet.level();
+                    pet.xp += level.needed - level.into;
+                }
+                KeyCode::Char('f') => pet.stats = pet.stats.shifted(by(-CHEAT_DRAIN, 0.0, 0.0)),
+                KeyCode::Char('p') => pet.stats = pet.stats.shifted(by(0.0, -CHEAT_DRAIN, 0.0)),
+                KeyCode::Char('e') => pet.stats = pet.stats.shifted(by(0.0, 0.0, -CHEAT_DRAIN)),
+                KeyCode::Char('r') => pet.stats = pet.stats.shifted(by(FULL, FULL, FULL)),
+                _ => {}
+            }
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,7 +264,7 @@ mod tests {
     fn an_action_plays_once_then_ends() {
         let species = species::builtin();
         let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0, 1.0);
+        let mut app = App::new(Some(pet), species, 0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
         assert_eq!(app.message(), Some("munches happily."));
         app.tick(Duration::from_secs(60));
@@ -213,7 +275,7 @@ mod tests {
     fn actions_wait_for_the_one_playing() {
         let species = species::builtin();
         let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0, 1.0);
+        let mut app = App::new(Some(pet), species, 0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
         app.on_key(KeyEvent::from(KeyCode::Char('p')));
         assert_eq!(app.message(), Some("munches happily."));
@@ -227,7 +289,7 @@ mod tests {
         let species = species::builtin();
         let mut pet = Pet::new("Mochi", &species[0].name);
         pet.stats.food = 0.0;
-        let mut app = App::new(Some(pet), species, 0, 1.0);
+        let mut app = App::new(Some(pet), species, 0);
         let feed = |app: &mut App| {
             app.on_key(KeyEvent::from(KeyCode::Char('f')));
             app.tick(Duration::from_secs(60));
@@ -242,8 +304,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
+    fn cheats_only_work_in_dev_mode() {
+        let species = species::builtin();
+        let pet = Pet::new("Mochi", &species[0].name);
+        let mut app = App::new(Some(pet), species, 0);
+        let level_up = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+        app.on_key(level_up);
+        assert_eq!(app.pet.as_ref().unwrap().level().number, 1);
+        app.start_dev();
+        app.on_key(level_up);
+        assert_eq!(app.pet.as_ref().unwrap().level().number, 2);
+    }
+
+    #[test]
     fn adopting_needs_a_name_and_any_letter_types() {
-        let mut app = App::new(None, species::builtin(), 0, 1.0);
+        let mut app = App::new(None, species::builtin(), 0);
         let mut press = |codes: &[KeyCode]| {
             for &code in codes {
                 app.on_key(KeyEvent::from(code));

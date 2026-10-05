@@ -14,8 +14,8 @@
       - `cargo build --release`
       - binary is in [workdir]/target/release
 
-## env vars
-- `PET_SPEED` -> default 1
+## dev mode
+- `cargo run -- --dev` -> no save, 600x speed, debug overlay, ctrl dev keys
 
 ## controls
 - esc/q -> quit

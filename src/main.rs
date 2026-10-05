@@ -19,8 +19,12 @@ const TICK: Duration = Duration::from_millis(100);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 
 fn main() -> Result<()> {
+    #[cfg(debug_assertions)]
+    let dev = std::env::args().any(|argument| argument == "--dev");
+    #[cfg(not(debug_assertions))]
+    let dev = false;
     let species = species::builtin();
-    let mut pet = save::load()?;
+    let mut pet = if dev { None } else { save::load()? };
     let mut choice = 0;
     if let Some(pet) = &mut pet {
         let known = species
@@ -34,7 +38,11 @@ fn main() -> Result<()> {
         let away = save::now().saturating_sub(pet.last_seen);
         pet.advance(Duration::from_secs(away));
     }
-    let mut app = App::new(pet, species, choice, speed());
+    let mut app = App::new(pet, species, choice);
+    #[cfg(debug_assertions)]
+    if dev {
+        app.start_dev();
+    }
     let result = run(&mut ratatui::init(), &mut app);
     ratatui::restore();
     store(&mut app)?;
@@ -42,6 +50,10 @@ fn main() -> Result<()> {
 }
 
 fn store(app: &mut App) -> Result<()> {
+    #[cfg(debug_assertions)]
+    if app.dev {
+        return Ok(());
+    }
     match &mut app.pet {
         Some(pet) => save::store(pet),
         None => Ok(()),
@@ -70,12 +82,4 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn speed() -> f32 {
-    std::env::var("PET_SPEED")
-        .ok()
-        .and_then(|speed| speed.parse().ok())
-        .filter(|speed| *speed > 0.0)
-        .unwrap_or(1.0)
 }

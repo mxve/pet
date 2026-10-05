@@ -28,7 +28,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    fn shifted(self, by: Stats) -> Stats {
+    pub fn shifted(self, by: Stats) -> Stats {
         Stats {
             food: (self.food + by.food).clamp(0.0, FULL),
             joy: (self.joy + by.joy).clamp(0.0, FULL),

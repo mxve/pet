@@ -39,6 +39,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::Adopt { name } => draw_adopt(frame, app, name),
         Screen::Home => draw_home(frame, app),
     }
+    #[cfg(debug_assertions)]
+    if app.dev {
+        draw_dev_overlay(frame, app);
+    }
 }
 
 fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
@@ -148,6 +152,34 @@ fn card(
     ])
     .horizontal_margin(CARD_PADDING)
     .areas(inside)
+}
+
+#[cfg(debug_assertions)]
+fn draw_dev_overlay(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+    let [stats, keys] =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(Rect {
+            y: area.bottom().saturating_sub(2),
+            height: area.height.min(2),
+            ..area
+        });
+    let clock = app.clock.as_secs_f32();
+    let speed = app.speed();
+    let line = match &app.pet {
+        Some(pet) => format!(
+            "dev | {speed}x | {clock:.0}s | food {:.1} joy {:.1} energy {:.1} | {:?} | xp {} + {:.2}",
+            pet.stats.food,
+            pet.stats.joy,
+            pet.stats.energy,
+            pet.mood(),
+            pet.xp,
+            pet.xp_fraction,
+        ),
+        None => format!("dev | {speed}x | {clock:.0}s | no pet"),
+    };
+    frame.render_widget(Line::styled(line, MUTED), stats);
+    let help = "ctrl + t speed | x xp | l level | f p e drain | r refill";
+    frame.render_widget(Line::styled(help, MUTED), keys);
 }
 
 fn draw_noise(frame: &mut Frame, seed: u64, clock: Duration) {

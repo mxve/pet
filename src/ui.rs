@@ -66,7 +66,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
     let (message, color) = app
         .message()
         .map_or_else(|| mood_status(pet.mood()), |message| (message, TEXT));
-    let line = Line::styled(format!("{} {message}.", pet.name), color).centered();
+    let line = Line::styled(format!("{} {message}", pet.name), color).centered();
     frame.render_widget(line, status);
 
     frame.render_widget(bar("Food    ", pet.stats.food, PEACH), food);
@@ -138,12 +138,12 @@ fn hint(key: String, label: &'static str) -> [Span<'static>; 3] {
 
 fn mood_status(mood: Mood) -> (&'static str, Color) {
     match mood {
-        Mood::Asleep => ("is fast asleep", TEXT),
-        Mood::Hungry => ("is hungry", ROSE),
-        Mood::Bored => ("is bored", ROSE),
-        Mood::Tired => ("is sleepy", ROSE),
-        Mood::Content => ("is doing fine", TEXT),
-        Mood::Happy => ("is happy", MINT),
+        Mood::Asleep => ("is fast asleep.", TEXT),
+        Mood::Hungry => ("is hungry.", ROSE),
+        Mood::Bored => ("is bored.", ROSE),
+        Mood::Tired => ("is sleepy.", ROSE),
+        Mood::Content => ("is doing fine.", TEXT),
+        Mood::Happy => ("is happy~", MINT),
     }
 }
 

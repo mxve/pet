@@ -26,7 +26,7 @@ pub const ACTIONS: &[Action] = &[
             joy: 2.0,
             energy: 0.0,
         },
-        message: "munches happily",
+        message: "munches happily.",
     },
     Action {
         key: 'p',
@@ -37,7 +37,7 @@ pub const ACTIONS: &[Action] = &[
             joy: 15.0,
             energy: 0.0,
         },
-        message: "loves the attention",
+        message: "loves the attention.",
     },
     Action {
         key: 'y',
@@ -48,7 +48,7 @@ pub const ACTIONS: &[Action] = &[
             joy: 25.0,
             energy: -10.0,
         },
-        message: "bounces around",
+        message: "bounces around.",
     },
 ];
 
@@ -188,7 +188,7 @@ mod tests {
         let pet = Pet::new("Mochi", &species[0].name);
         let mut app = App::new(Some(pet), species, 0, 1.0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
-        assert_eq!(app.message(), Some("munches happily"));
+        assert_eq!(app.message(), Some("munches happily."));
         app.tick(Duration::from_secs(60));
         assert_eq!(app.message(), None);
     }

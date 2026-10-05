@@ -1,9 +1,12 @@
 use std::time::Duration;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::text::Span;
 
 use crate::pet::{Mood, Pet, Stats};
 use crate::species::{Clip, Species};
+
+const NAME_WIDTH: usize = 12;
 
 pub struct Action {
     pub key: char,
@@ -50,7 +53,7 @@ pub const ACTIONS: &[Action] = &[
 ];
 
 pub enum Screen {
-    Adopt,
+    Adopt { name: String },
     Home,
 }
 
@@ -71,7 +74,9 @@ impl App {
             screen: if pet.is_some() {
                 Screen::Home
             } else {
-                Screen::Adopt
+                Screen::Adopt {
+                    name: String::new(),
+                }
             },
             pet,
             species,
@@ -111,20 +116,29 @@ impl App {
             return;
         }
         match self.screen {
-            Screen::Adopt => self.on_adopt_key(key.code),
+            Screen::Adopt { .. } => self.on_adopt_key(key.code),
             Screen::Home => self.on_home_key(key.code),
         }
     }
 
     fn on_adopt_key(&mut self, code: KeyCode) {
+        let Screen::Adopt { name } = &mut self.screen else {
+            return;
+        };
         let count = self.species.len();
         match code {
             KeyCode::Esc => self.quit = true,
             KeyCode::Left => self.choice = (self.choice + count - 1) % count,
             KeyCode::Right => self.choice = (self.choice + 1) % count,
-            KeyCode::Enter => {
-                let name = &self.chosen().name;
-                self.pet = Some(Pet::new(name, name));
+            KeyCode::Backspace => _ = name.pop(),
+            KeyCode::Char(character) => {
+                name.push(character);
+                if Span::raw(name.as_str()).width() > NAME_WIDTH {
+                    name.pop();
+                }
+            }
+            KeyCode::Enter if !name.trim().is_empty() => {
+                self.pet = Some(Pet::new(name.trim(), &self.species[self.choice].name));
                 self.screen = Screen::Home;
             }
             _ => {}
@@ -179,12 +193,23 @@ mod tests {
     }
 
     #[test]
-    fn enter_adopts_the_species_on_screen() {
+    fn adopting_needs_a_name_and_any_letter_types() {
         let mut app = App::new(None, species::builtin(), 0, 1.0);
-        for code in [KeyCode::Left, KeyCode::Right, KeyCode::Enter] {
-            app.on_key(KeyEvent::from(code));
-        }
-        assert_eq!(app.pet, Some(Pet::new("Cat", "Cat")));
+        let mut press = |codes: &[KeyCode]| {
+            for &code in codes {
+                app.on_key(KeyEvent::from(code));
+            }
+        };
+        press(&[
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char(' '),
+            KeyCode::Enter,
+        ]);
+        press(&[KeyCode::Char('q'), KeyCode::Char('f'), KeyCode::Backspace]);
+        press(&[KeyCode::Enter]);
+        assert_eq!(app.pet, Some(Pet::new("q", "Cat")));
         assert!(matches!(app.screen, Screen::Home));
+        assert!(!app.quit);
     }
 }

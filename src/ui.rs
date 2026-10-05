@@ -15,17 +15,17 @@ const CARD_HEIGHT: u16 = 14;
 const CARD_PADDING: u16 = 3;
 
 pub fn draw(frame: &mut Frame, app: &App) {
-    match app.screen {
-        Screen::Adopt => draw_adopt(frame, app),
+    match &app.screen {
+        Screen::Adopt { name } => draw_adopt(frame, app, name),
         Screen::Home => draw_home(frame, app),
     }
 }
 
-fn draw_adopt(frame: &mut Frame, app: &App) {
+fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     let species = app.chosen();
     let title = Line::styled(" adopt a pet ", species.color);
     let keys = [("<- ->", "choose"), ("enter", "adopt"), ("esc", "quit")];
-    let [stage, name, ..] = card(frame, title, LAVENDER, help(keys));
+    let [stage, choice, _, typed, ..] = card(frame, title, LAVENDER, help(keys));
 
     let art = species.animation(Clip::Idle).frame_at(app.clock);
     draw_pet(frame, species, art, stage);
@@ -35,7 +35,14 @@ fn draw_adopt(frame: &mut Frame, app: &App) {
         Span::styled(species.name.as_str(), species.color),
         Span::styled("  >", MUTED),
     ]);
-    frame.render_widget(line.centered(), name);
+    frame.render_widget(line.centered(), choice);
+
+    let line = if name.is_empty() {
+        Line::styled("type a name", MUTED)
+    } else {
+        Line::from(vec![Span::styled(name, TEXT), Span::styled("_", YELLOW)])
+    };
+    frame.render_widget(line.centered(), typed);
 }
 
 fn draw_home(frame: &mut Frame, app: &App) {

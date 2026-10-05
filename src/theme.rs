@@ -9,3 +9,18 @@ pub const YELLOW: Color = Color::Rgb(0xf9, 0xe2, 0xaf);
 pub const LAVENDER: Color = Color::Rgb(0xb4, 0xbe, 0xfe);
 pub const TEXT: Color = Color::Rgb(0xcd, 0xd6, 0xf4);
 pub const MUTED: Color = Color::Rgb(0x6c, 0x70, 0x86);
+
+pub fn mix(from: Color, to: Color, amount: f32) -> Color {
+    let (Color::Rgb(red, green, blue), Color::Rgb(to_red, to_green, to_blue)) = (from, to) else {
+        return from;
+    };
+    let channel = |from: u8, to: u8| {
+        let (from, to) = (f32::from(from), f32::from(to));
+        (from + (to - from) * amount).round() as u8
+    };
+    Color::Rgb(
+        channel(red, to_red),
+        channel(green, to_green),
+        channel(blue, to_blue),
+    )
+}

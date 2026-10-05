@@ -8,6 +8,7 @@ use crate::pet::{Mood, Pet, Stats};
 use crate::species::{Clip, Species};
 
 const NAME_WIDTH: usize = 12;
+const POINTS_PER_XP: f32 = 5.0;
 const ONGOING_BLINK: Duration = Duration::from_millis(200);
 
 pub struct Action {
@@ -171,7 +172,8 @@ impl App {
             }
             KeyCode::Char(character) => {
                 if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
-                    pet.apply(action.effect);
+                    let points = pet.apply(action.effect);
+                    pet.xp += (points / POINTS_PER_XP) as u32;
                     self.acting = Some((action, Duration::ZERO));
                 }
             }
@@ -218,6 +220,25 @@ mod tests {
         app.tick(Duration::from_secs(60));
         app.on_key(KeyEvent::from(KeyCode::Char('p')));
         assert_eq!(app.message(), Some("loves the attention."));
+    }
+
+    #[test]
+    fn only_care_that_helps_earns_xp() {
+        let species = species::builtin();
+        let mut pet = Pet::new("Mochi", &species[0].name);
+        pet.stats.food = 0.0;
+        let mut app = App::new(Some(pet), species, 0, 1.0);
+        let feed = |app: &mut App| {
+            app.on_key(KeyEvent::from(KeyCode::Char('f')));
+            app.tick(Duration::from_secs(60));
+            app.pet.as_ref().unwrap().xp
+        };
+        assert_eq!(feed(&mut app), 6);
+        for _ in 0..5 {
+            feed(&mut app);
+        }
+        let full = feed(&mut app);
+        assert_eq!(feed(&mut app), full);
     }
 
     #[test]

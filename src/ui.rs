@@ -1,4 +1,3 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Duration;
 
 use ratatui::Frame;
@@ -9,7 +8,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen};
+use crate::bar;
 use crate::pet::{self, Mood};
+use crate::random::roll;
 use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 
@@ -42,7 +43,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     let species = app.chosen();
-    let heading = Span::styled("adopt a pet", species.color);
+    let heading = vec![Span::styled("adopt a pet", species.color)];
     let keys = [("<- ->", "choose"), ("enter", "adopt"), ("esc", "quit")];
     let [stage, choice, _, typed, ..] = card(frame, heading, LAVENDER, &ADOPT, help(keys, None));
 
@@ -69,7 +70,11 @@ fn draw_home(frame: &mut Frame, app: &App) {
         return;
     };
     let species = app.chosen();
-    let heading = Span::styled(format!("{} the {}", pet.name, species.name), species.color);
+    let level = pet.level();
+    let heading = vec![
+        Span::styled(format!("{} the {}", pet.name, species.name), species.color),
+        Span::styled(format!(" | Lv {}", level.number), TEXT),
+    ];
     let border = if pet.asleep { MUTED } else { LAVENDER };
     let keys = ACTIONS
         .iter()
@@ -94,28 +99,39 @@ fn draw_home(frame: &mut Frame, app: &App) {
     frame.render_widget(bar("Food    ", pet.stats.food, PEACH), food);
     frame.render_widget(bar("Joy     ", pet.stats.joy, PINK), joy);
     frame.render_widget(bar("Energy  ", pet.stats.energy, SKY), energy);
+
+    let [_, row] = card_rows(frame);
+    let row = row.inner(Margin::new(CARD_PADDING + 1, 0));
+    let label = Line::styled(format!(" {}/{} xp", level.into, level.needed), MUTED);
+    let [track, number] = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(label.width() as u16),
+    ])
+    .areas(row);
+    let ratio = level.into as f32 / level.needed as f32;
+    frame.render_widget(bar::xp_bar(ratio, track.width, app.clock), track);
+    frame.render_widget(label, number);
 }
 
 fn card(
     frame: &mut Frame,
-    heading: Span,
+    heading: Vec<Span>,
     border: Color,
     decoration: &Decoration,
     help: Line,
 ) -> [Rect; 7] {
     let color = decoration.color;
     let [left, right] = decoration.title;
-    let title = Line::from(vec![
-        Span::styled(format!(" {left} "), color),
-        heading,
-        Span::styled(format!(" {right} "), color),
-    ]);
+    let mut title = vec![Span::styled(format!(" {left} "), color)];
+    title.extend(heading);
+    title.push(Span::styled(format!(" {right} "), color));
+    let title = Line::from(title);
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(border)
         .title(title.centered())
         .title_bottom(help.centered());
-    let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT);
+    let area = card_area(frame);
     let inside = card.inner(area);
     frame.render_widget(Clear, area);
     frame.render_widget(card, area);
@@ -155,10 +171,14 @@ fn time_slot(seed: u64, position: Position, clock: Duration) -> u64 {
     (clock.as_millis() as u64 + offset) / period
 }
 
-fn roll(key: impl Hash) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    key.hash(&mut hasher);
-    hasher.finish()
+fn card_area(frame: &Frame) -> Rect {
+    let [card, ..] = card_rows(frame);
+    card
+}
+
+fn card_rows(frame: &Frame) -> [Rect; 2] {
+    let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT + 1);
+    Layout::vertical([Constraint::Length(CARD_HEIGHT), Constraint::Length(1)]).areas(area)
 }
 
 fn draw_ornaments(frame: &mut Frame, decoration: &Decoration, inside: Rect) {

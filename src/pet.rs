@@ -6,6 +6,9 @@ pub const FULL: f32 = 100.0;
 pub const LOW: f32 = 25.0;
 const HIGH: f32 = 70.0;
 const CATCH_UP_STEP: Duration = Duration::from_secs(60);
+const LEVEL_BASE_XP: f64 = 20.0;
+const LEVELS_PER_DOUBLING: f64 = 7.0;
+const ASLEEP_XP_PER_HOUR: f32 = 1.0;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
     joy: -6.0,
@@ -52,12 +55,21 @@ pub enum Mood {
     Happy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Level {
+    pub number: u32,
+    pub into: u32,
+    pub needed: u32,
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pet {
     pub name: String,
     pub species: String,
     pub stats: Stats,
     pub asleep: bool,
+    pub xp: u32,
+    pub xp_fraction: f32,
     pub last_seen: u64,
 }
 
@@ -72,13 +84,20 @@ impl Pet {
                 energy: FULL,
             },
             asleep: false,
+            xp: 0,
+            xp_fraction: 0.0,
             last_seen: 0,
         }
     }
 
-    pub fn apply(&mut self, effect: Stats) {
+    pub fn apply(&mut self, effect: Stats) -> f32 {
+        let before = self.stats;
         self.stats = self.stats.shifted(effect);
         self.asleep = false;
+        let gain = |now: f32, then: f32| (now - then).max(0.0);
+        gain(self.stats.food, before.food)
+            + gain(self.stats.joy, before.joy)
+            + gain(self.stats.energy, before.energy)
     }
 
     pub fn tick(&mut self, elapsed: Duration) {
@@ -89,9 +108,19 @@ impl Pet {
             AWAKE_RATE_PER_HOUR
         };
         self.stats = self.stats.shifted(rate.scaled(hours));
+        if self.asleep {
+            self.earn(ASLEEP_XP_PER_HOUR * hours);
+        }
         if self.stats.energy >= FULL {
             self.asleep = false;
         }
+    }
+
+    fn earn(&mut self, xp: f32) {
+        self.xp_fraction += xp;
+        let whole = self.xp_fraction.floor();
+        self.xp += whole as u32;
+        self.xp_fraction -= whole;
     }
 
     pub fn advance(&mut self, elapsed: Duration) {
@@ -100,6 +129,20 @@ impl Pet {
             let step = left.min(CATCH_UP_STEP);
             self.tick(step);
             left -= step;
+        }
+    }
+
+    pub fn level(&self) -> Level {
+        let mut number = 1;
+        let mut into = self.xp;
+        while into >= level_cost(number) {
+            into -= level_cost(number);
+            number += 1;
+        }
+        Level {
+            number,
+            into,
+            needed: level_cost(number),
         }
     }
 
@@ -120,6 +163,11 @@ impl Pet {
             Mood::Tired
         }
     }
+}
+
+fn level_cost(level: u32) -> u32 {
+    let doublings = f64::from(level - 1) / LEVELS_PER_DOUBLING;
+    (LEVEL_BASE_XP * doublings.exp2()).round() as u32
 }
 
 #[cfg(test)]
@@ -180,6 +228,32 @@ mod tests {
         pet.tick(Duration::from_secs(3600 * 3));
         assert_eq!(pet.stats.energy, FULL);
         assert!(!pet.asleep);
+    }
+
+    #[test]
+    fn levels_cost_more_and_more() {
+        let level_at = |xp| {
+            let mut pet = Pet::new("Mochi", "Cat");
+            pet.xp = xp;
+            pet.level().number
+        };
+        assert_eq!(
+            [level_at(19), level_at(20), level_at(92), level_at(93)],
+            [1, 2, 4, 5]
+        );
+        assert_eq!(level_cost(8), 2 * level_cost(1));
+    }
+
+    #[test]
+    fn sleeping_earns_a_little_xp() {
+        let mut pet = Pet::new("Mochi", "Cat");
+        pet.stats.energy = 0.0;
+        pet.asleep = true;
+        pet.advance(Duration::from_secs(150 * 60));
+        assert_eq!(pet.xp, 2);
+        let mut awake = Pet::new("Mochi", "Cat");
+        awake.advance(Duration::from_secs(150 * 60));
+        assert_eq!(awake.xp, 0);
     }
 
     #[test]

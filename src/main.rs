@@ -1,5 +1,7 @@
 mod app;
+mod bar;
 mod pet;
+mod random;
 mod save;
 mod species;
 mod theme;

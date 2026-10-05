@@ -1,3 +1,4 @@
+use std::hash::{BuildHasher, RandomState};
 use std::time::Duration;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -63,6 +64,7 @@ pub struct App {
     pub choice: usize,
     pub screen: Screen,
     pub clock: Duration,
+    pub seed: u64,
     pub quit: bool,
     acting: Option<(&'static Action, Duration)>,
     speed: f32,
@@ -82,6 +84,7 @@ impl App {
             species,
             choice,
             clock: Duration::ZERO,
+            seed: RandomState::new().hash_one(0),
             quit: false,
             acting: None,
             speed,

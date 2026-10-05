@@ -181,7 +181,7 @@ impl App {
             KeyCode::Char(character) => {
                 if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
                     let points = pet.apply(action.effect);
-                    pet.xp += (points / POINTS_PER_XP) as u32;
+                    pet.earn(points / POINTS_PER_XP);
                     self.acting = Some((action, Duration::ZERO));
                 }
             }
@@ -206,11 +206,11 @@ mod dev {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::App;
-    use crate::pet::{FULL, Stats};
+    use crate::pet::{FULL, Skill, Stats};
 
     const SPEED: f32 = 600.0;
     const SPEEDS: [f32; 5] = [1.0, 10.0, 60.0, 600.0, 3600.0];
-    const CHEAT_XP: u32 = 10;
+    const CHEAT_XP: f32 = 10.0;
     const CHEAT_DRAIN: f32 = 25.0;
 
     impl App {
@@ -239,10 +239,10 @@ mod dev {
             };
             let by = |food, joy, energy| Stats { food, joy, energy };
             match key.code {
-                KeyCode::Char('x') => pet.xp += CHEAT_XP,
+                KeyCode::Char('x') => pet.earn(CHEAT_XP),
                 KeyCode::Char('l') => {
-                    let level = pet.level();
-                    pet.xp += level.needed - level.into;
+                    let level = pet.skill(Skill::Hitpoints);
+                    pet.earn((level.needed - level.into) as f32);
                 }
                 KeyCode::Char('f') => pet.stats = pet.stats.shifted(by(-CHEAT_DRAIN, 0.0, 0.0)),
                 KeyCode::Char('p') => pet.stats = pet.stats.shifted(by(0.0, -CHEAT_DRAIN, 0.0)),
@@ -258,6 +258,7 @@ mod dev {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pet::Skill;
     use crate::species;
 
     #[test]
@@ -293,14 +294,14 @@ mod tests {
         let feed = |app: &mut App| {
             app.on_key(KeyEvent::from(KeyCode::Char('f')));
             app.tick(Duration::from_secs(60));
-            app.pet.as_ref().unwrap().xp
+            app.pet.as_ref().unwrap().xp(Skill::Hitpoints)
         };
-        assert_eq!(feed(&mut app), 6);
+        assert_eq!(feed(&mut app), 6.0);
         for _ in 0..5 {
             feed(&mut app);
         }
         let full = feed(&mut app);
-        assert_eq!(feed(&mut app), full);
+        assert!(feed(&mut app) - full < 0.1);
     }
 
     #[test]
@@ -311,10 +312,10 @@ mod tests {
         let mut app = App::new(Some(pet), species, 0);
         let level_up = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
         app.on_key(level_up);
-        assert_eq!(app.pet.as_ref().unwrap().level().number, 1);
+        assert_eq!(app.pet.as_ref().unwrap().level(), 5);
         app.start_dev();
         app.on_key(level_up);
-        assert_eq!(app.pet.as_ref().unwrap().level().number, 2);
+        assert_eq!(app.pet.as_ref().unwrap().level(), 6);
     }
 
     #[test]

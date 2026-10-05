@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ const HIGH: f32 = 70.0;
 const CATCH_UP_STEP: Duration = Duration::from_secs(60);
 const LEVEL_BASE_XP: f64 = 20.0;
 const LEVELS_PER_DOUBLING: f64 = 7.0;
+const MAX_LEVEL: u32 = 99;
 const ASLEEP_XP_PER_HOUR: f32 = 1.0;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
@@ -55,11 +57,51 @@ pub enum Mood {
     Happy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Skill {
+    Hitpoints,
+    Attack,
+    Defence,
+    Speed,
+    Stamina,
+}
+
+impl Skill {
+    pub const ALL: [Skill; 5] = [
+        Skill::Hitpoints,
+        Skill::Attack,
+        Skill::Defence,
+        Skill::Speed,
+        Skill::Stamina,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Skill::Hitpoints => "Hitpoints",
+            Skill::Attack => "Attack",
+            Skill::Defence => "Defence",
+            Skill::Speed => "Speed",
+            Skill::Stamina => "Stamina",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Level {
     pub number: u32,
     pub into: u32,
     pub needed: u32,
+}
+
+impl Level {
+    pub fn ratio(self) -> f32 {
+        if self.needed == 0 {
+            1.0
+        } else {
+            self.into as f32 / self.needed as f32
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -68,8 +110,7 @@ pub struct Pet {
     pub species: String,
     pub stats: Stats,
     pub asleep: bool,
-    pub xp: u32,
-    pub xp_fraction: f32,
+    pub skills: BTreeMap<Skill, f32>,
     pub last_seen: u64,
 }
 
@@ -84,8 +125,7 @@ impl Pet {
                 energy: FULL,
             },
             asleep: false,
-            xp: 0,
-            xp_fraction: 0.0,
+            skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
             last_seen: 0,
         }
     }
@@ -116,11 +156,23 @@ impl Pet {
         }
     }
 
-    fn earn(&mut self, xp: f32) {
-        self.xp_fraction += xp;
-        let whole = self.xp_fraction.floor();
-        self.xp += whole as u32;
-        self.xp_fraction -= whole;
+    pub fn earn(&mut self, xp: f32) {
+        *self.skills.entry(Skill::Hitpoints).or_default() += xp;
+    }
+
+    pub fn xp(&self, skill: Skill) -> f32 {
+        self.skills.get(&skill).copied().unwrap_or(0.0)
+    }
+
+    pub fn skill(&self, skill: Skill) -> Level {
+        level_at(self.xp(skill))
+    }
+
+    pub fn level(&self) -> u32 {
+        Skill::ALL
+            .iter()
+            .map(|&skill| self.skill(skill).number)
+            .sum()
     }
 
     pub fn advance(&mut self, elapsed: Duration) {
@@ -129,20 +181,6 @@ impl Pet {
             let step = left.min(CATCH_UP_STEP);
             self.tick(step);
             left -= step;
-        }
-    }
-
-    pub fn level(&self) -> Level {
-        let mut number = 1;
-        let mut into = self.xp;
-        while into >= level_cost(number) {
-            into -= level_cost(number);
-            number += 1;
-        }
-        Level {
-            number,
-            into,
-            needed: level_cost(number),
         }
     }
 
@@ -162,6 +200,27 @@ impl Pet {
         } else {
             Mood::Tired
         }
+    }
+}
+
+fn level_at(xp: f32) -> Level {
+    let mut number = 1;
+    let mut into = xp as u32;
+    while number < MAX_LEVEL && into >= level_cost(number) {
+        into -= level_cost(number);
+        number += 1;
+    }
+    if number == MAX_LEVEL {
+        return Level {
+            number,
+            into: 0,
+            needed: 0,
+        };
+    }
+    Level {
+        number,
+        into,
+        needed: level_cost(number),
     }
 }
 
@@ -231,17 +290,22 @@ mod tests {
     }
 
     #[test]
-    fn levels_cost_more_and_more() {
-        let level_at = |xp| {
-            let mut pet = Pet::new("Mochi", "Cat");
-            pet.xp = xp;
-            pet.level().number
-        };
+    fn levels_cost_more_and_more_up_to_99() {
+        let number = |xp| level_at(xp).number;
         assert_eq!(
-            [level_at(19), level_at(20), level_at(92), level_at(93)],
+            [number(19.0), number(20.0), number(92.0), number(93.0)],
             [1, 2, 4, 5]
         );
         assert_eq!(level_cost(8), 2 * level_cost(1));
+        assert_eq!(number(1e9), MAX_LEVEL);
+    }
+
+    #[test]
+    fn the_level_is_every_skill_added_up() {
+        let mut pet = Pet::new("Mochi", "Cat");
+        assert_eq!(pet.level(), 5);
+        pet.earn(20.0);
+        assert_eq!(pet.level(), 6);
     }
 
     #[test]
@@ -250,10 +314,10 @@ mod tests {
         pet.stats.energy = 0.0;
         pet.asleep = true;
         pet.advance(Duration::from_secs(150 * 60));
-        assert_eq!(pet.xp, 2);
+        assert!((pet.xp(Skill::Hitpoints) - 2.5).abs() < 0.01);
         let mut awake = Pet::new("Mochi", "Cat");
         awake.advance(Duration::from_secs(150 * 60));
-        assert_eq!(awake.xp, 0);
+        assert_eq!(awake.xp(Skill::Hitpoints), 0.0);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen};
 use crate::bar;
-use crate::pet::{self, Mood};
+use crate::pet::{self, Mood, Skill};
 use crate::random::roll;
 use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
@@ -74,10 +74,11 @@ fn draw_home(frame: &mut Frame, app: &App) {
         return;
     };
     let species = app.chosen();
-    let level = pet.level();
+    let shown = Skill::Hitpoints;
+    let level = pet.skill(shown);
     let heading = vec![
         Span::styled(format!("{} the {}", pet.name, species.name), species.color),
-        Span::styled(format!(" | Lv {}", level.number), TEXT),
+        Span::styled(format!(" | Lv {}", pet.level()), TEXT),
     ];
     let border = if pet.asleep { MUTED } else { LAVENDER };
     let keys = ACTIONS
@@ -106,13 +107,16 @@ fn draw_home(frame: &mut Frame, app: &App) {
 
     let [_, row] = card_rows(frame);
     let row = row.inner(Margin::new(CARD_PADDING + 1, 0));
-    let label = Line::styled(format!(" {}/{} xp", level.into, level.needed), MUTED);
+    let label = Line::styled(
+        format!(" {} {}/{}", shown.name(), level.into, level.needed),
+        MUTED,
+    );
     let [track, number] = Layout::horizontal([
         Constraint::Fill(1),
         Constraint::Length(label.width() as u16),
     ])
     .areas(row);
-    let ratio = level.into as f32 / level.needed as f32;
+    let ratio = level.ratio();
     frame.render_widget(bar::xp_bar(ratio, track.width, app.clock), track);
     frame.render_widget(label, number);
 }
@@ -167,13 +171,12 @@ fn draw_dev_overlay(frame: &mut Frame, app: &App) {
     let speed = app.speed();
     let line = match &app.pet {
         Some(pet) => format!(
-            "dev | {speed}x | {clock:.0}s | food {:.1} joy {:.1} energy {:.1} | {:?} | xp {} + {:.2}",
+            "dev | {speed}x | {clock:.0}s | food {:.1} joy {:.1} energy {:.1} | {:?} | hitpoints xp {:.2}",
             pet.stats.food,
             pet.stats.joy,
             pet.stats.energy,
             pet.mood(),
-            pet.xp,
-            pet.xp_fraction,
+            pet.xp(Skill::Hitpoints),
         ),
         None => format!("dev | {speed}x | {clock:.0}s | no pet"),
     };

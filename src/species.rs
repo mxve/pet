@@ -7,10 +7,8 @@ use serde::Deserialize;
 
 use crate::Result;
 
-const BUILTIN: [&str; 2] = [
-    include_str!("../pets/cat.toml"),
-    include_str!("../pets/dog.toml"),
-];
+include!(concat!(env!("OUT_DIR"), "/pets.rs"));
+
 const ESCAPE: char = '^';
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]

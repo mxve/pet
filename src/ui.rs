@@ -44,7 +44,7 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     let species = app.chosen();
     let heading = Span::styled("adopt a pet", species.color);
     let keys = [("<- ->", "choose"), ("enter", "adopt"), ("esc", "quit")];
-    let [stage, choice, _, typed, ..] = card(frame, heading, LAVENDER, &ADOPT, help(keys));
+    let [stage, choice, _, typed, ..] = card(frame, heading, LAVENDER, &ADOPT, help(keys, None));
 
     let art = species.animation(Clip::Idle).frame_at(app.clock);
     draw_pet(frame, species, art, stage);
@@ -75,8 +75,13 @@ fn draw_home(frame: &mut Frame, app: &App) {
         .iter()
         .map(|action| (action.key, action.label))
         .chain([('s', "sleep"), ('q', "quit")]);
-    let [stage, status, _, food, joy, energy, _] =
-        card(frame, heading, border, &decoration(pet.mood()), help(keys));
+    let [stage, status, _, food, joy, energy, _] = card(
+        frame,
+        heading,
+        border,
+        &decoration(pet.mood()),
+        help(keys, app.ongoing()),
+    );
 
     draw_pet(frame, species, app.frame(pet), stage);
 
@@ -180,26 +185,32 @@ fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) {
     frame.render_widget(art, area);
 }
 
-fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>) -> Line<'static> {
+fn help<K: ToString>(
+    keys: impl IntoIterator<Item = (K, &'static str)>,
+    lit: Option<char>,
+) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (index, (key, label)) in keys.into_iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(" | ", MUTED));
         }
-        spans.extend(hint(key.to_string(), label));
+        let key = key.to_string();
+        let glowing = lit.is_some_and(|lit| key == lit.to_string());
+        spans.extend(hint(key, label, glowing));
     }
     spans.push(Span::raw(" "));
     Line::from(spans)
 }
 
-fn hint(key: String, label: &'static str) -> [Span<'static>; 3] {
+fn hint(key: String, label: &'static str, glowing: bool) -> [Span<'static>; 3] {
+    let word = if glowing { PINK } else { MUTED };
     match label.find(&key) {
         Some(at) => {
             let end = at + key.len();
             [
-                Span::styled(&label[..at], MUTED),
+                Span::styled(&label[..at], word),
                 Span::styled(&label[at..end], YELLOW),
-                Span::styled(&label[end..], MUTED),
+                Span::styled(&label[end..], word),
             ]
         }
         None => [

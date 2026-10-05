@@ -8,6 +8,7 @@ use crate::pet::{Mood, Pet, Stats};
 use crate::species::{Clip, Species};
 
 const NAME_WIDTH: usize = 12;
+const ONGOING_BLINK: Duration = Duration::from_millis(200);
 
 pub struct Action {
     pub key: char,
@@ -109,6 +110,16 @@ impl App {
         species.animation(clip).frame_at(self.clock)
     }
 
+    pub fn ongoing(&self) -> Option<char> {
+        let (key, held) = match (self.acting, &self.pet) {
+            (Some((action, played)), _) => (action.key, played),
+            (None, Some(pet)) if pet.asleep => ('s', self.clock),
+            _ => return None,
+        };
+        let blink = held.as_millis() / ONGOING_BLINK.as_millis();
+        blink.is_multiple_of(2).then_some(key)
+    }
+
     pub fn message(&self) -> Option<&'static str> {
         self.acting.map(|(action, _)| action.message)
     }
@@ -154,9 +165,9 @@ impl App {
         };
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            _ if self.acting.is_some() => {}
             KeyCode::Char('s') => {
                 pet.asleep = !pet.asleep;
-                self.acting = None;
             }
             KeyCode::Char(character) => {
                 if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
@@ -194,6 +205,19 @@ mod tests {
         assert_eq!(app.message(), Some("munches happily."));
         app.tick(Duration::from_secs(60));
         assert_eq!(app.message(), None);
+    }
+
+    #[test]
+    fn actions_wait_for_the_one_playing() {
+        let species = species::builtin();
+        let pet = Pet::new("Mochi", &species[0].name);
+        let mut app = App::new(Some(pet), species, 0, 1.0);
+        app.on_key(KeyEvent::from(KeyCode::Char('f')));
+        app.on_key(KeyEvent::from(KeyCode::Char('p')));
+        assert_eq!(app.message(), Some("munches happily."));
+        app.tick(Duration::from_secs(60));
+        app.on_key(KeyEvent::from(KeyCode::Char('p')));
+        assert_eq!(app.message(), Some("loves the attention."));
     }
 
     #[test]

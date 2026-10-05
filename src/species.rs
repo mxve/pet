@@ -7,7 +7,10 @@ use serde::Deserialize;
 
 use crate::Result;
 
-const BUILTIN: [&str; 1] = [include_str!("../pets/cat.toml")];
+const BUILTIN: [&str; 2] = [
+    include_str!("../pets/cat.toml"),
+    include_str!("../pets/dog.toml"),
+];
 const ESCAPE: char = '^';
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -71,6 +74,7 @@ impl Animation {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Species {
+    #[serde(rename = "species")]
     pub name: String,
     pub color: Color,
     #[serde(default)]
@@ -174,7 +178,7 @@ mod tests {
 
     #[test]
     fn cat_is_measured_by_its_largest_frame() {
-        assert_eq!(builtin()[0].size(), (13, 4));
+        assert_eq!(builtin()[0].size(), (12, 4));
     }
 
     #[test]
@@ -222,7 +226,7 @@ mod tests {
     }
 
     const SAMPLE: &str = r##"
-name = "Sample"
+species = "Sample"
 color = "#010101"
 
 [colors]

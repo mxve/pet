@@ -11,7 +11,7 @@ use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 
 const CARD_WIDTH: u16 = 49;
-const CARD_HEIGHT: u16 = 13;
+const CARD_HEIGHT: u16 = 14;
 const CARD_PADDING: u16 = 3;
 
 pub fn draw(frame: &mut Frame, app: &App) {

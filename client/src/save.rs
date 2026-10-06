@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::Result;
-use crate::pet::Pet;
+use pet_core::pet::Pet;
 
 pub fn path() -> Result<PathBuf> {
     let home = std::env::home_dir().ok_or("cannot find the home directory")?;
@@ -40,7 +40,7 @@ pub fn store(pet: &mut Pet) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::pet::{Activity, Pet};
+    use pet_core::pet::{Activity, Pet};
 
     #[test]
     fn a_pet_survives_the_save_format() {

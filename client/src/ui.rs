@@ -9,10 +9,10 @@ use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen, Tone};
 use crate::bar;
-use crate::pet::{self, Activity, Focus, Mood, Pet, Skill};
-use crate::random::roll;
 use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
+use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
+use pet_core::random::roll;
 
 const CARD_WIDTH: u16 = 49;
 const CARD_HEIGHT: u16 = 14;

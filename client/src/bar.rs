@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use ratatui::text::{Line, Span};
 
-use crate::random::roll;
 use crate::theme::{self, LAVENDER, MUTED, PINK, TEXT};
+use pet_core::random::roll;
 
 const SPARKLES: [&str; 5] = ["₊", ".", "⋆", "+", "✧"];
 const EMPTY: &str = "┄";

@@ -869,9 +869,17 @@ dependencies = [
 name = "pet"
 version = "0.1.0"
 dependencies = [
+ "pet-core",
  "ratatui",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "pet-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

@@ -5,8 +5,8 @@ use std::time::Duration;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
-use crate::pet::{Activity, Focus, Mood, Pet, Skill, Stats};
 use crate::species::{Clip, Species};
+use pet_core::pet::{Activity, Focus, Mood, Pet, Skill, Stats};
 
 const NAME_WIDTH: usize = 12;
 const POINTS_PER_XP: f32 = 5.0;
@@ -322,7 +322,7 @@ mod dev {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::App;
-    use crate::pet::{FULL, Stats};
+    use pet_core::pet::{FULL, Stats};
 
     const SPEED: f32 = 600.0;
     const SPEEDS: [f32; 5] = [1.0, 10.0, 60.0, 600.0, 3600.0];

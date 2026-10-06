@@ -1,0 +1,10 @@
+[package]
+name = "pet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pet-core = { path = "../core" }
+ratatui = { version = "0.30", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"

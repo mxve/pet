@@ -13,6 +13,8 @@ const MAX_LEVEL: u32 = 99;
 const ALL_SKILLS_SHARE: f32 = 0.1;
 const ASLEEP_XP_PER_HOUR: f32 = 1.0;
 const TRAINING_XP_PER_HOUR: f32 = 30.0;
+const STAMINA_SAVING_PER_LEVEL: f32 = 0.01;
+const MAX_STAMINA_SAVING: f32 = 0.5;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
     joy: -6.0,
@@ -169,11 +171,14 @@ impl Pet {
 
     pub fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
-        let (rate, xp_per_hour) = match self.activity {
+        let (mut rate, xp_per_hour) = match self.activity {
             Activity::Awake => (AWAKE_RATE_PER_HOUR, 0.0),
             Activity::Asleep => (ASLEEP_RATE_PER_HOUR, ASLEEP_XP_PER_HOUR),
             Activity::Training => (TRAINING_RATE_PER_HOUR, TRAINING_XP_PER_HOUR),
         };
+        if rate.energy < 0.0 {
+            rate.energy *= 1.0 - self.stamina_saving();
+        }
         self.stats = self.stats.shifted(rate.scaled(hours));
         self.earn(xp_per_hour * hours);
         let rested = self.stats.energy >= FULL;
@@ -183,6 +188,11 @@ impl Pet {
             Activity::Training if spent => self.activity = Activity::Awake,
             Activity::Awake | Activity::Asleep | Activity::Training => {}
         }
+    }
+
+    fn stamina_saving(&self) -> f32 {
+        let levels = self.skill(Skill::Stamina).number;
+        (levels as f32 * STAMINA_SAVING_PER_LEVEL).min(MAX_STAMINA_SAVING)
     }
 
     pub fn earn(&mut self, xp: f32) {
@@ -252,7 +262,7 @@ impl Pet {
 }
 
 fn level_at(xp: f32) -> Level {
-    let mut number = 1;
+    let mut number = 0;
     let mut into = xp as u32;
     while number < MAX_LEVEL && into >= level_cost(number) {
         into -= level_cost(number);
@@ -273,7 +283,7 @@ fn level_at(xp: f32) -> Level {
 }
 
 fn level_cost(level: u32) -> u32 {
-    let doublings = f64::from(level - 1) / LEVELS_PER_DOUBLING;
+    let doublings = f64::from(level) / LEVELS_PER_DOUBLING;
     (LEVEL_BASE_XP * doublings.exp2()).round() as u32
 }
 
@@ -342,9 +352,9 @@ mod tests {
         let number = |xp| level_at(xp).number;
         assert_eq!(
             [number(19.0), number(20.0), number(92.0), number(93.0)],
-            [1, 2, 4, 5]
+            [0, 1, 3, 4]
         );
-        assert_eq!(level_cost(8), 2 * level_cost(1));
+        assert_eq!(level_cost(7), 2 * level_cost(0));
         assert_eq!(number(1e9), MAX_LEVEL);
     }
 
@@ -375,11 +385,25 @@ mod tests {
     }
 
     #[test]
+    fn stamina_slows_energy_loss() {
+        let mut pet = Pet::new("Mochi", "Cat");
+        let to_level_20: u32 = (0..20).map(level_cost).sum();
+        pet.skills.insert(Skill::Stamina, to_level_20 as f32);
+        assert_eq!(pet.skill(Skill::Stamina).number, 20);
+        pet.tick(Duration::from_secs(3600));
+        assert!((pet.stats.energy - 96.0).abs() < 0.001);
+        pet.stats.energy = 50.0;
+        pet.activity = Activity::Asleep;
+        pet.tick(Duration::from_secs(3600));
+        assert_eq!(pet.stats.energy, 75.0);
+    }
+
+    #[test]
     fn the_level_is_every_skill_added_up() {
         let mut pet = Pet::new("Mochi", "Cat");
-        assert_eq!(pet.level(), 5);
+        assert_eq!(pet.level(), 0);
         pet.earn(20.0);
-        assert_eq!(pet.level(), 6);
+        assert_eq!(pet.level(), 1);
     }
 
     #[test]

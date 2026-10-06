@@ -357,10 +357,10 @@ mod tests {
         let mut app = App::new(Some(pet), species, 0);
         let level_up = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
         app.on_key(level_up);
-        assert_eq!(app.pet.as_ref().unwrap().level(), 5);
+        assert_eq!(app.pet.as_ref().unwrap().level(), 0);
         app.start_dev();
         app.on_key(level_up);
-        assert_eq!(app.pet.as_ref().unwrap().level(), 6);
+        assert_eq!(app.pet.as_ref().unwrap().level(), 1);
     }
 
     #[test]

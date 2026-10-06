@@ -10,6 +10,7 @@ const CATCH_UP_STEP: Duration = Duration::from_secs(60);
 const LEVEL_BASE_XP: f64 = 20.0;
 const LEVELS_PER_DOUBLING: f64 = 7.0;
 const MAX_LEVEL: u32 = 99;
+const ALL_SKILLS_SHARE: f32 = 0.1;
 const ASLEEP_XP_PER_HOUR: f32 = 1.0;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
@@ -87,6 +88,13 @@ impl Skill {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Focus {
+    One(Skill),
+    All,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Level {
     pub number: u32,
@@ -111,6 +119,7 @@ pub struct Pet {
     pub stats: Stats,
     pub asleep: bool,
     pub skills: BTreeMap<Skill, f32>,
+    pub focus: Focus,
     pub last_seen: u64,
 }
 
@@ -126,6 +135,7 @@ impl Pet {
             },
             asleep: false,
             skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
+            focus: Focus::One(Skill::Hitpoints),
             last_seen: 0,
         }
     }
@@ -157,7 +167,24 @@ impl Pet {
     }
 
     pub fn earn(&mut self, xp: f32) {
-        *self.skills.entry(Skill::Hitpoints).or_default() += xp;
+        match self.focus {
+            Focus::One(skill) => *self.skills.entry(skill).or_default() += xp,
+            Focus::All => {
+                for skill in Skill::ALL {
+                    *self.skills.entry(skill).or_default() += xp * ALL_SKILLS_SHARE;
+                }
+            }
+        }
+    }
+
+    pub fn tracked(&self) -> Skill {
+        match self.focus {
+            Focus::One(skill) => skill,
+            Focus::All => Skill::ALL
+                .into_iter()
+                .max_by(|a, b| self.skill(*a).ratio().total_cmp(&self.skill(*b).ratio()))
+                .unwrap_or(Skill::Hitpoints),
+        }
     }
 
     pub fn xp(&self, skill: Skill) -> f32 {
@@ -298,6 +325,19 @@ mod tests {
         );
         assert_eq!(level_cost(8), 2 * level_cost(1));
         assert_eq!(number(1e9), MAX_LEVEL);
+    }
+
+    #[test]
+    fn xp_follows_the_focus() {
+        let mut pet = Pet::new("Mochi", "Cat");
+        pet.focus = Focus::One(Skill::Attack);
+        pet.earn(10.0);
+        assert_eq!(pet.xp(Skill::Attack), 10.0);
+        assert_eq!(pet.xp(Skill::Hitpoints), 0.0);
+        pet.focus = Focus::All;
+        pet.earn(10.0);
+        assert_eq!(pet.xp(Skill::Attack), 11.0);
+        assert_eq!(pet.xp(Skill::Stamina), 1.0);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen};
 use crate::bar;
-use crate::pet::{self, Mood, Skill};
+use crate::pet::{self, Mood};
 use crate::random::roll;
 use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
@@ -74,7 +74,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
         return;
     };
     let species = app.chosen();
-    let shown = Skill::Hitpoints;
+    let shown = pet.tracked();
     let level = pet.skill(shown);
     let heading = vec![
         Span::styled(format!("{} the {}", pet.name, species.name), species.color),
@@ -170,12 +170,13 @@ fn draw_dev_overlay(frame: &mut Frame, app: &App) {
     let speed = app.speed();
     let line = match &app.pet {
         Some(pet) => format!(
-            "dev | {speed}x | {clock:.0}s | food {:.1} joy {:.1} energy {:.1} | {:?} | hitpoints xp {:.2}",
+            "dev | {speed}x | {clock:.0}s | food {:.1} joy {:.1} energy {:.1} | {:?} | {} xp {:.2}",
             pet.stats.food,
             pet.stats.joy,
             pet.stats.energy,
             pet.mood(),
-            pet.xp(Skill::Hitpoints),
+            pet.tracked().name(),
+            pet.xp(pet.tracked()),
         ),
         None => format!("dev | {speed}x | {clock:.0}s | no pet"),
     };

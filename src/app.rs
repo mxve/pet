@@ -206,7 +206,7 @@ mod dev {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::App;
-    use crate::pet::{FULL, Skill, Stats};
+    use crate::pet::{FULL, Stats};
 
     const SPEED: f32 = 600.0;
     const SPEEDS: [f32; 5] = [1.0, 10.0, 60.0, 600.0, 3600.0];
@@ -241,7 +241,7 @@ mod dev {
             match key.code {
                 KeyCode::Char('x') => pet.earn(CHEAT_XP),
                 KeyCode::Char('l') => {
-                    let level = pet.skill(Skill::Hitpoints);
+                    let level = pet.skill(pet.tracked());
                     pet.earn((level.needed - level.into) as f32);
                 }
                 KeyCode::Char('f') => pet.stats = pet.stats.shifted(by(-CHEAT_DRAIN, 0.0, 0.0)),

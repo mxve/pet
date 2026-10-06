@@ -40,7 +40,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    pub fn shifted(self, by: Stats) -> Stats {
+    pub(crate) fn shifted(self, by: Stats) -> Stats {
         Stats {
             food: (self.food + by.food).clamp(0.0, FULL),
             joy: (self.joy + by.joy).clamp(0.0, FULL),
@@ -162,7 +162,7 @@ impl Pet {
         }
     }
 
-    pub fn apply(&mut self, effect: Stats) -> f32 {
+    pub(crate) fn apply(&mut self, effect: Stats) -> f32 {
         let before = self.stats;
         self.stats = self.stats.shifted(effect);
         if self.activity == Activity::Asleep {
@@ -172,7 +172,7 @@ impl Pet {
         gain(self.stats.food, before.food) + gain(self.stats.joy, before.joy) + gain(self.stats.energy, before.energy)
     }
 
-    pub fn tick(&mut self, elapsed: Duration) {
+    pub(crate) fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
         let (mut rate, xp_per_hour) = match self.activity {
             Activity::Awake if self.mood() == Mood::Happy => (AWAKE_RATE_PER_HOUR, HAPPY_XP_PER_HOUR),
@@ -199,7 +199,7 @@ impl Pet {
         (levels as f32 * STAMINA_SAVING_PER_LEVEL).min(MAX_STAMINA_SAVING)
     }
 
-    pub fn earn(&mut self, xp: f32) {
+    pub(crate) fn earn(&mut self, xp: f32) {
         match self.focus {
             Focus::One(skill) => *self.skills.entry(skill).or_default() += xp,
             Focus::All => {
@@ -237,7 +237,7 @@ impl Pet {
         Skill::ALL.iter().map(|&skill| self.skill(skill).number).sum()
     }
 
-    pub fn advance(&mut self, elapsed: Duration) {
+    pub(crate) fn advance(&mut self, elapsed: Duration) {
         let mut left = elapsed;
         while !left.is_zero() {
             let step = left.min(CATCH_UP_STEP);

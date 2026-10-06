@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::Result;
 use pet_core::pet::Pet;
+use pet_core::world::World;
 
 pub fn path() -> Result<PathBuf> {
     let home = std::env::home_dir().ok_or("cannot find the home directory")?;
@@ -26,14 +27,14 @@ pub fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs())
 }
 
-pub fn store(pet: &mut Pet) -> Result<()> {
-    pet.last_seen = now();
+pub fn store(world: &mut World) -> Result<()> {
+    world.stamp(now());
     let path = path()?;
     let temporary = path.with_extension("toml.tmp");
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder)?;
     }
-    fs::write(&temporary, toml::to_string(pet)?)?;
+    fs::write(&temporary, toml::to_string(world.pet())?)?;
     fs::rename(&temporary, &path)?;
     Ok(())
 }

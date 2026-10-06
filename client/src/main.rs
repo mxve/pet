@@ -51,8 +51,8 @@ fn store(app: &mut App) -> Result<()> {
     if app.dev {
         return Ok(());
     }
-    match &mut app.pet {
-        Some(pet) => save::store(pet),
+    match &mut app.world {
+        Some(world) => save::store(world),
         None => Ok(()),
     }
 }

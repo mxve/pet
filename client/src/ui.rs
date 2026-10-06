@@ -7,12 +7,13 @@ use ratatui::symbols::line::THICK_HORIZONTAL;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
-use crate::app::{ACTIONS, App, Screen, Tone};
+use crate::app::{App, Screen, Tone};
 use crate::bar;
-use crate::species::{Clip, Species};
+use crate::species::Species;
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use pet_core::random::roll;
+use pet_core::world::{ACTIONS, Clip};
 
 const CARD_WIDTH: u16 = 49;
 const CARD_HEIGHT: u16 = 14;
@@ -77,7 +78,7 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
 }
 
 fn draw_home(frame: &mut Frame, app: &App) {
-    let Some(pet) = &app.pet else {
+    let Some(pet) = app.pet() else {
         return;
     };
     let species = app.chosen();
@@ -162,7 +163,7 @@ fn stage_rows(inside: Rect) -> [Rect; 7] {
 }
 
 fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
-    let Some(pet) = &app.pet else {
+    let Some(pet) = app.pet() else {
         return;
     };
     let heading = vec![Span::styled(format!("{}'s skills", pet.name), app.chosen().color)];
@@ -215,7 +216,7 @@ fn draw_dev_overlay(frame: &mut Frame, app: &App) {
     });
     let clock = app.clock.as_secs_f32();
     let speed = app.speed();
-    let line = match &app.pet {
+    let line = match app.pet() {
         Some(pet) => format!(
             "dev | {speed}x | {clock:.0}s | food {:.1} joy {:.1} energy {:.1} | {:?} | {} xp {:.2}",
             pet.stats.food,

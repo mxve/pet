@@ -6,32 +6,17 @@ use ratatui::text::{Line, Span, Text};
 use serde::Deserialize;
 
 use crate::Result;
+use pet_core::world::Clip;
 
 include!(concat!(env!("OUT_DIR"), "/pets.rs"));
 
 const ESCAPE: char = '^';
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Clip {
-    Idle,
-    Happy,
-    Sad,
-    Eat,
-    Pet,
-    Play,
-    Sleep,
-    Train,
-    Cheer,
-}
-
-impl Clip {
-    fn fallback(self) -> Option<Clip> {
-        match self {
-            Clip::Train => Some(Clip::Play),
-            Clip::Cheer => Some(Clip::Happy),
-            Clip::Idle | Clip::Happy | Clip::Sad | Clip::Eat | Clip::Pet | Clip::Play | Clip::Sleep => None,
-        }
+fn fallback(clip: Clip) -> Option<Clip> {
+    match clip {
+        Clip::Train => Some(Clip::Play),
+        Clip::Cheer => Some(Clip::Happy),
+        Clip::Idle | Clip::Happy | Clip::Sad | Clip::Eat | Clip::Pet | Clip::Play | Clip::Sleep => None,
     }
 }
 
@@ -114,7 +99,7 @@ impl Species {
     pub fn animation(&self, clip: Clip) -> &Animation {
         self.clips
             .get(&clip)
-            .or_else(|| clip.fallback().and_then(|fallback| self.clips.get(&fallback)))
+            .or_else(|| fallback(clip).and_then(|fallback| self.clips.get(&fallback)))
             .unwrap_or(&self.clips[&Clip::Idle])
     }
 

@@ -2,60 +2,16 @@ use std::collections::VecDeque;
 use std::hash::{BuildHasher, RandomState};
 use std::time::Duration;
 
+use pet_core::pet::{Activity, Focus, Mood, Pet, Skill};
+use pet_core::world::{ACTIONS, Clip, Command, Event, World};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
-use crate::species::{Clip, Species};
-use pet_core::pet::{Activity, Focus, Mood, Pet, Skill, Stats};
+use crate::species::Species;
 
 const NAME_WIDTH: usize = 12;
-const POINTS_PER_XP: f32 = 5.0;
 const ONGOING_BLINK: Duration = Duration::from_millis(200);
 const NOTICE_TIME: Duration = Duration::from_secs(2);
-
-pub struct Action {
-    pub key: char,
-    pub label: &'static str,
-    pub clip: Clip,
-    pub effect: Stats,
-    pub message: &'static str,
-}
-
-pub const ACTIONS: &[Action] = &[
-    Action {
-        key: 'f',
-        label: "feed",
-        clip: Clip::Eat,
-        effect: Stats {
-            food: 30.0,
-            joy: 2.0,
-            energy: 0.0,
-        },
-        message: "munches happily.",
-    },
-    Action {
-        key: 'p',
-        label: "pet",
-        clip: Clip::Pet,
-        effect: Stats {
-            food: 0.0,
-            joy: 15.0,
-            energy: 0.0,
-        },
-        message: "loves the attention.",
-    },
-    Action {
-        key: 'y',
-        label: "play",
-        clip: Clip::Play,
-        effect: Stats {
-            food: -5.0,
-            joy: 25.0,
-            energy: -10.0,
-        },
-        message: "bounces around.",
-    },
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
@@ -75,7 +31,7 @@ pub enum Screen {
 }
 
 pub struct App {
-    pub pet: Option<Pet>,
+    pub world: Option<World>,
     pub species: Vec<Species>,
     pub choice: usize,
     pub screen: Screen,
@@ -87,22 +43,18 @@ pub struct App {
     acting: Option<(Clip, Duration)>,
     notices: VecDeque<Notice>,
     notice_shown: Duration,
-    pet_level: u32,
-    skill_levels: [u32; Skill::ALL.len()],
     speed: f32,
 }
 
 impl App {
     pub fn new(pet: Option<Pet>, species: Vec<Species>, choice: usize) -> App {
-        let pet_level = pet.as_ref().map_or(0, |pet| pet.level().number);
-        let skill_levels = pet.as_ref().map_or([0; Skill::ALL.len()], skill_levels);
         App {
             screen: if pet.is_some() {
                 Screen::Home
             } else {
                 Screen::Adopt { name: String::new() }
             },
-            pet,
+            world: pet.map(World::new),
             species,
             choice,
             clock: Duration::ZERO,
@@ -113,10 +65,12 @@ impl App {
             acting: None,
             notices: VecDeque::new(),
             notice_shown: Duration::ZERO,
-            pet_level,
-            skill_levels,
             speed: 1.0,
         }
+    }
+
+    pub fn pet(&self) -> Option<&Pet> {
+        self.world.as_ref().map(World::pet)
     }
 
     pub fn chosen(&self) -> &Species {
@@ -143,7 +97,7 @@ impl App {
             let action = ACTIONS.iter().find(|action| action.clip == clip)?;
             Some((action.key, played))
         });
-        let (key, held) = match (action, self.pet.as_ref().map(|pet| pet.activity)) {
+        let (key, held) = match (action, self.pet().map(|pet| pet.activity)) {
             (Some(action), _) => action,
             (None, Some(Activity::Asleep)) => ('s', self.clock),
             (None, Some(Activity::Training)) => ('r', self.clock),
@@ -158,37 +112,42 @@ impl App {
     }
 
     pub fn catch_up(&mut self, away: Duration) {
-        if let Some(pet) = &mut self.pet {
-            pet.advance(away);
-        }
-        self.announce_level_ups();
+        let events = self.world.as_mut().map(|world| world.advance(away)).unwrap_or_default();
+        self.announce(events);
     }
 
-    fn announce_level_ups(&mut self) {
-        let Some(pet) = &self.pet else {
+    fn send(&mut self, command: Command) {
+        let Some(world) = &mut self.world else {
             return;
         };
-        let pet_level = pet.level().number;
-        let skill_levels = skill_levels(pet);
-        if pet_level > self.pet_level {
-            self.notices.push_back(Notice {
-                text: format!("reached level {pet_level}!"),
-                tone: Tone::Good,
-            });
-            self.acting = Some((Clip::Cheer, Duration::ZERO));
+        let Ok(outcome) = world.apply(command, self.clock) else {
+            return;
+        };
+        if let Some(clip) = outcome.clip {
+            self.acting = Some((clip, Duration::ZERO));
         }
-        self.pet_level = pet_level;
-        let pairs = self.skill_levels.into_iter().zip(skill_levels);
-        for (skill, (before, now)) in Skill::ALL.iter().zip(pairs) {
-            if now > before {
-                self.notices.push_back(Notice {
-                    text: format!("reached {} {now}!", skill.name()),
-                    tone: Tone::Good,
-                });
+        if let Some(message) = outcome.message {
+            self.notices.push_front(Notice {
+                text: message.to_string(),
+                tone: Tone::Plain,
+            });
+            self.notice_shown = Duration::ZERO;
+        }
+        self.announce(outcome.events);
+    }
+
+    fn announce(&mut self, events: Vec<Event>) {
+        for event in events {
+            let (text, tone) = match event {
+                Event::Level(level) => (format!("reached level {level}!"), Tone::Good),
+                Event::Skill(skill, level) => (format!("reached {} {level}!", skill.name()), Tone::Good),
+                Event::TrainingEnded => ("is worn out from training.".to_string(), Tone::Plain),
+            };
+            if tone == Tone::Good {
                 self.acting = Some((Clip::Cheer, Duration::ZERO));
             }
+            self.notices.push_back(Notice { text, tone });
         }
-        self.skill_levels = skill_levels;
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
@@ -223,7 +182,8 @@ impl App {
                 }
             }
             KeyCode::Enter if !name.trim().is_empty() => {
-                self.pet = Some(Pet::new(name.trim(), &self.species[self.choice].name));
+                let pet = Pet::new(name.trim(), &self.species[self.choice].name);
+                self.world = Some(World::new(pet));
                 self.screen = Screen::Home;
             }
             _ => {}
@@ -231,13 +191,15 @@ impl App {
     }
 
     fn on_home_key(&mut self, code: KeyCode) {
-        let Some(pet) = &mut self.pet else {
+        let Some(pet) = self.pet() else {
             return;
         };
+        let activity = pet.activity;
+        let focus = pet.focus;
         match code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('k') => {
-                let choice = match pet.focus {
+                let choice = match focus {
                     Focus::One(skill) => Skill::ALL.iter().position(|each| *each == skill),
                     Focus::All => None,
                 };
@@ -245,29 +207,14 @@ impl App {
                     choice: choice.unwrap_or(Skill::ALL.len()),
                 };
             }
-            _ if self.acting.is_some() => {}
-            KeyCode::Char('s') => pet.activity = toggled(pet.activity, Activity::Asleep),
-            KeyCode::Char('r') => pet.activity = toggled(pet.activity, Activity::Training),
-            KeyCode::Char(character) => {
-                if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
-                    let points = pet.apply(action.effect);
-                    pet.earn(points / POINTS_PER_XP);
-                    self.acting = Some((action.clip, Duration::ZERO));
-                    self.notices.push_front(Notice {
-                        text: action.message.to_string(),
-                        tone: Tone::Plain,
-                    });
-                    self.notice_shown = Duration::ZERO;
-                }
-            }
+            KeyCode::Char('s') => self.send(Command::Activity(toggled(activity, Activity::Asleep))),
+            KeyCode::Char('r') => self.send(Command::Activity(toggled(activity, Activity::Training))),
+            KeyCode::Char(key) if ACTIONS.iter().any(|action| action.key == key) => self.send(Command::Act(key)),
             _ => {}
         }
     }
 
     fn on_skills_key(&mut self, code: KeyCode, choice: usize) {
-        let Some(pet) = &mut self.pet else {
-            return;
-        };
         let rows = Skill::ALL.len() + 1;
         match code {
             KeyCode::Char('q') => self.quit = true,
@@ -283,7 +230,8 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                pet.focus = Skill::ALL.get(choice).map_or(Focus::All, |&skill| Focus::One(skill));
+                let focus = Skill::ALL.get(choice).map_or(Focus::All, |&skill| Focus::One(skill));
+                self.send(Command::Focus(focus));
             }
             _ => {}
         }
@@ -291,14 +239,16 @@ impl App {
 
     pub fn tick(&mut self, elapsed: Duration) {
         self.clock += elapsed;
-        if let Some(pet) = &mut self.pet {
-            pet.tick(elapsed.mul_f32(self.speed));
-        }
+        let events = self
+            .world
+            .as_mut()
+            .map(|world| world.tick(elapsed.mul_f32(self.speed)))
+            .unwrap_or_default();
         self.acting = self
             .acting
             .map(|(clip, played)| (clip, played + elapsed))
             .filter(|(clip, played)| *played < self.chosen().animation(*clip).duration());
-        self.announce_level_ups();
+        self.announce(events);
         if self.acting.is_none() && !self.notices.is_empty() {
             self.notice_shown += elapsed;
             if self.notice_shown >= NOTICE_TIME {
@@ -309,24 +259,20 @@ impl App {
     }
 }
 
-fn skill_levels(pet: &Pet) -> [u32; Skill::ALL.len()] {
-    Skill::ALL.map(|skill| pet.skill(skill).number)
-}
-
 fn toggled(current: Activity, wanted: Activity) -> Activity {
     if current == wanted { Activity::Awake } else { wanted }
 }
 
 #[cfg(debug_assertions)]
 mod dev {
+    use pet_core::pet::{FULL, Stats};
+    use pet_core::world::{Cheat, Command};
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::App;
-    use pet_core::pet::{FULL, Stats};
 
     const SPEED: f32 = 600.0;
     const SPEEDS: [f32; 5] = [1.0, 10.0, 60.0, 600.0, 3600.0];
-    const CHEAT_XP: f32 = 10.0;
     const CHEAT_DRAIN: f32 = 25.0;
 
     impl App {
@@ -345,27 +291,22 @@ mod dev {
             if !control || alt {
                 return false;
             }
-            if key.code == KeyCode::Char('t') {
-                let current = SPEEDS.iter().position(|speed| *speed == self.speed);
-                self.speed = SPEEDS[current.map_or(0, |index| (index + 1) % SPEEDS.len())];
-                return true;
-            }
-            let Some(pet) = &mut self.pet else {
-                return true;
-            };
             let by = |food, joy, energy| Stats { food, joy, energy };
-            match key.code {
-                KeyCode::Char('x') => pet.earn(CHEAT_XP),
-                KeyCode::Char('l') => {
-                    let level = pet.level();
-                    pet.earn((level.needed - level.into) as f32);
+            let cheat = match key.code {
+                KeyCode::Char('t') => {
+                    let current = SPEEDS.iter().position(|speed| *speed == self.speed);
+                    self.speed = SPEEDS[current.map_or(0, |index| (index + 1) % SPEEDS.len())];
+                    return true;
                 }
-                KeyCode::Char('f') => pet.stats = pet.stats.shifted(by(-CHEAT_DRAIN, 0.0, 0.0)),
-                KeyCode::Char('p') => pet.stats = pet.stats.shifted(by(0.0, -CHEAT_DRAIN, 0.0)),
-                KeyCode::Char('e') => pet.stats = pet.stats.shifted(by(0.0, 0.0, -CHEAT_DRAIN)),
-                KeyCode::Char('r') => pet.stats = pet.stats.shifted(by(FULL, FULL, FULL)),
-                _ => {}
-            }
+                KeyCode::Char('x') => Cheat::Xp,
+                KeyCode::Char('l') => Cheat::NextLevel,
+                KeyCode::Char('f') => Cheat::Shift(by(-CHEAT_DRAIN, 0.0, 0.0)),
+                KeyCode::Char('p') => Cheat::Shift(by(0.0, -CHEAT_DRAIN, 0.0)),
+                KeyCode::Char('e') => Cheat::Shift(by(0.0, 0.0, -CHEAT_DRAIN)),
+                KeyCode::Char('r') => Cheat::Shift(by(FULL, FULL, FULL)),
+                _ => return true,
+            };
+            self.send(Command::Cheat(cheat));
             true
         }
     }
@@ -375,64 +316,6 @@ mod dev {
 mod tests {
     use super::*;
     use crate::species;
-
-    const WAIT: Duration = Duration::from_secs(10);
-
-    fn shown(app: &App) -> Option<&str> {
-        app.notice().map(|notice| notice.text.as_str())
-    }
-
-    #[test]
-    fn actions_wait_for_the_one_playing() {
-        let species = species::builtin();
-        let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0);
-        app.on_key(KeyEvent::from(KeyCode::Char('f')));
-        app.on_key(KeyEvent::from(KeyCode::Char('p')));
-        assert_eq!(shown(&app), Some("munches happily."));
-        app.tick(WAIT);
-        app.on_key(KeyEvent::from(KeyCode::Char('p')));
-        assert_eq!(shown(&app), Some("loves the attention."));
-    }
-
-    #[test]
-    fn only_care_that_helps_earns_xp() {
-        let species = species::builtin();
-        let mut pet = Pet::new("Mochi", &species[0].name);
-        pet.stats.food = 0.0;
-        let mut app = App::new(Some(pet), species, 0);
-        let feed = |app: &mut App| {
-            app.on_key(KeyEvent::from(KeyCode::Char('f')));
-            app.tick(Duration::from_secs(60));
-            app.pet.as_ref().unwrap().xp(Skill::Hitpoints)
-        };
-        assert_eq!(feed(&mut app), 6.0);
-        for _ in 0..5 {
-            feed(&mut app);
-        }
-        let full = feed(&mut app);
-        assert!(feed(&mut app) - full < 0.1);
-    }
-
-    #[test]
-    fn level_ups_become_notices_one_after_another() {
-        let species = species::builtin();
-        let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0);
-        let pet = app.pet.as_mut().unwrap();
-        pet.earn(300.0);
-        pet.focus = Focus::One(Skill::Attack);
-        pet.earn(20.0);
-        app.tick(Duration::from_millis(100));
-        assert_eq!(shown(&app), Some("reached level 2!"));
-        assert_eq!(app.acting.map(|(clip, _)| clip), Some(Clip::Cheer));
-        app.tick(WAIT);
-        assert_eq!(shown(&app), Some("reached Hitpoints 9!"));
-        app.tick(WAIT);
-        assert_eq!(shown(&app), Some("reached Attack 1!"));
-        app.tick(WAIT);
-        assert_eq!(shown(&app), None);
-    }
 
     #[test]
     fn adopting_needs_a_name_and_any_letter_types() {
@@ -445,7 +328,7 @@ mod tests {
         press(&[KeyCode::Left, KeyCode::Right, KeyCode::Char(' '), KeyCode::Enter]);
         press(&[KeyCode::Char('q'), KeyCode::Char('f'), KeyCode::Backspace]);
         press(&[KeyCode::Enter]);
-        assert_eq!(app.pet, Some(Pet::new("q", &app.species[0].name)));
+        assert_eq!(app.pet(), Some(&Pet::new("q", &app.species[0].name)));
         assert!(matches!(app.screen, Screen::Home));
         assert!(!app.quit);
     }

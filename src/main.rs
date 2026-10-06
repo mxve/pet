@@ -24,9 +24,10 @@ fn main() -> Result<()> {
     #[cfg(not(debug_assertions))]
     let dev = false;
     let species = species::builtin();
-    let mut pet = if dev { None } else { save::load()? };
+    let pet = if dev { None } else { save::load()? };
     let mut choice = 0;
-    if let Some(pet) = &mut pet {
+    let mut away = Duration::ZERO;
+    if let Some(pet) = &pet {
         let known = species
             .iter()
             .position(|species| species.name == pet.species);
@@ -35,10 +36,10 @@ fn main() -> Result<()> {
             return Err(format!("{}: unknown species \"{}\"", path.display(), pet.species).into());
         };
         choice = known;
-        let away = save::now().saturating_sub(pet.last_seen);
-        pet.advance(Duration::from_secs(away));
+        away = Duration::from_secs(save::now().saturating_sub(pet.last_seen));
     }
     let mut app = App::new(pet, species, choice);
+    app.catch_up(away);
     #[cfg(debug_assertions)]
     if dev {
         app.start_dev();

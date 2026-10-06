@@ -103,9 +103,11 @@ fn draw_home(frame: &mut Frame, app: &App) {
 
     draw_pet(frame, species, app.frame(pet), stage);
 
-    let (message, color) = app
-        .message()
-        .map_or_else(|| mood_status(pet.mood()), |message| (message, TEXT));
+    let (message, color) = match (app.message(), app.notice()) {
+        (Some(message), _) => (message, TEXT),
+        (None, Some(notice)) => (notice, MINT),
+        (None, None) => mood_status(pet.mood()),
+    };
     let line = Line::styled(format!("{} {message}", pet.name), color).centered();
     frame.render_widget(line, status);
 

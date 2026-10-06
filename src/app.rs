@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::hash::{BuildHasher, RandomState};
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use crate::species::{Clip, Species};
 const NAME_WIDTH: usize = 12;
 const POINTS_PER_XP: f32 = 5.0;
 const ONGOING_BLINK: Duration = Duration::from_millis(200);
+const NOTICE_TIME: Duration = Duration::from_secs(2);
 
 pub struct Action {
     pub key: char,
@@ -72,11 +74,15 @@ pub struct App {
     #[cfg(debug_assertions)]
     pub dev: bool,
     acting: Option<(&'static Action, Duration)>,
+    notices: VecDeque<String>,
+    notice_shown: Duration,
+    levels: [u32; Skill::ALL.len()],
     speed: f32,
 }
 
 impl App {
     pub fn new(pet: Option<Pet>, species: Vec<Species>, choice: usize) -> App {
+        let levels = pet.as_ref().map_or([0; Skill::ALL.len()], levels_of);
         App {
             screen: if pet.is_some() {
                 Screen::Home
@@ -94,6 +100,9 @@ impl App {
             #[cfg(debug_assertions)]
             dev: false,
             acting: None,
+            notices: VecDeque::new(),
+            notice_shown: Duration::ZERO,
+            levels,
             speed: 1.0,
         }
     }
@@ -130,6 +139,31 @@ impl App {
 
     pub fn message(&self) -> Option<&'static str> {
         self.acting.map(|(action, _)| action.message)
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notices.front().map(String::as_str)
+    }
+
+    pub fn catch_up(&mut self, away: Duration) {
+        if let Some(pet) = &mut self.pet {
+            pet.advance(away);
+        }
+        self.announce_level_ups();
+    }
+
+    fn announce_level_ups(&mut self) {
+        let Some(pet) = &self.pet else {
+            return;
+        };
+        let levels = levels_of(pet);
+        for ((skill, before), now) in Skill::ALL.iter().zip(self.levels).zip(levels) {
+            if now > before {
+                self.notices
+                    .push_back(format!("reached {} {now}!", skill.name()));
+            }
+        }
+        self.levels = levels;
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
@@ -236,7 +270,19 @@ impl App {
             .acting
             .map(|(action, played)| (action, played + elapsed))
             .filter(|(action, played)| *played < self.chosen().animation(action.clip).duration());
+        self.announce_level_ups();
+        if self.acting.is_none() && !self.notices.is_empty() {
+            self.notice_shown += elapsed;
+            if self.notice_shown >= NOTICE_TIME {
+                self.notices.pop_front();
+                self.notice_shown = Duration::ZERO;
+            }
+        }
     }
+}
+
+fn levels_of(pet: &Pet) -> [u32; Skill::ALL.len()] {
+    Skill::ALL.map(|skill| pet.skill(skill).number)
 }
 
 fn toggled(current: Activity, wanted: Activity) -> Activity {
@@ -376,6 +422,23 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Char('r')));
         app.on_key(KeyEvent::from(KeyCode::Char('r')));
         assert_eq!(activity(&app), Activity::Awake);
+    }
+
+    #[test]
+    fn level_ups_become_notices_one_after_another() {
+        let species = species::builtin();
+        let pet = Pet::new("Mochi", &species[0].name);
+        let mut app = App::new(Some(pet), species, 0);
+        let pet = app.pet.as_mut().unwrap();
+        pet.earn(300.0);
+        pet.focus = Focus::One(Skill::Attack);
+        pet.earn(20.0);
+        app.tick(Duration::from_millis(100));
+        assert_eq!(app.notice(), Some("reached Hitpoints 9!"));
+        app.tick(NOTICE_TIME);
+        assert_eq!(app.notice(), Some("reached Attack 1!"));
+        app.tick(NOTICE_TIME);
+        assert_eq!(app.notice(), None);
     }
 
     #[test]

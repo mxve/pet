@@ -22,12 +22,14 @@ pub enum Clip {
     Play,
     Sleep,
     Train,
+    Cheer,
 }
 
 impl Clip {
     fn fallback(self) -> Option<Clip> {
         match self {
             Clip::Train => Some(Clip::Play),
+            Clip::Cheer => Some(Clip::Happy),
             Clip::Idle
             | Clip::Happy
             | Clip::Sad

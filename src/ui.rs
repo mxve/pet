@@ -7,7 +7,7 @@ use ratatui::symbols::line::THICK_HORIZONTAL;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
-use crate::app::{ACTIONS, App, Screen};
+use crate::app::{ACTIONS, App, Screen, Tone};
 use crate::bar;
 use crate::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use crate::random::roll;
@@ -103,10 +103,9 @@ fn draw_home(frame: &mut Frame, app: &App) {
 
     draw_pet(frame, species, app.frame(pet), stage);
 
-    let (message, color) = match (app.message(), app.notice()) {
-        (Some(message), _) => (message, TEXT),
-        (None, Some(notice)) => (notice, MINT),
-        (None, None) => mood_status(pet.mood()),
+    let (message, color) = match app.notice() {
+        Some(notice) => (notice.text.as_str(), tone_color(notice.tone)),
+        None => mood_status(pet.mood()),
     };
     let line = Line::styled(format!("{} {message}", pet.name), color).centered();
     frame.render_widget(line, status);
@@ -376,6 +375,13 @@ fn decoration(mood: Mood) -> Decoration {
             ornament: ["♡", "."],
             color: ROSE,
         },
+    }
+}
+
+fn tone_color(tone: Tone) -> Color {
+    match tone {
+        Tone::Plain => TEXT,
+        Tone::Good => MINT,
     }
 }
 

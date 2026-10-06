@@ -57,6 +57,17 @@ pub const ACTIONS: &[Action] = &[
     },
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Plain,
+    Good,
+}
+
+pub struct Notice {
+    pub text: String,
+    pub tone: Tone,
+}
+
 pub enum Screen {
     Adopt { name: String },
     Home,
@@ -73,8 +84,8 @@ pub struct App {
     pub quit: bool,
     #[cfg(debug_assertions)]
     pub dev: bool,
-    acting: Option<(&'static Action, Duration)>,
-    notices: VecDeque<String>,
+    acting: Option<(Clip, Duration)>,
+    notices: VecDeque<Notice>,
     notice_shown: Duration,
     levels: [u32; Skill::ALL.len()],
     speed: f32,
@@ -113,8 +124,8 @@ impl App {
 
     pub fn frame(&self, pet: &Pet) -> &str {
         let species = self.chosen();
-        if let Some((action, elapsed)) = self.acting {
-            return species.animation(action.clip).frame_at(elapsed);
+        if let Some((clip, elapsed)) = self.acting {
+            return species.animation(clip).frame_at(elapsed);
         }
         let clip = match pet.mood() {
             Mood::Asleep => Clip::Sleep,
@@ -128,7 +139,10 @@ impl App {
 
     pub fn ongoing(&self) -> Option<char> {
         let (key, held) = match (self.acting, &self.pet) {
-            (Some((action, played)), _) => (action.key, played),
+            (Some((clip, played)), _) => {
+                let action = ACTIONS.iter().find(|action| action.clip == clip)?;
+                (action.key, played)
+            }
             (None, Some(pet)) if pet.activity == Activity::Asleep => ('s', self.clock),
             (None, Some(pet)) if pet.activity == Activity::Training => ('r', self.clock),
             _ => return None,
@@ -137,12 +151,8 @@ impl App {
         blink.is_multiple_of(2).then_some(key)
     }
 
-    pub fn message(&self) -> Option<&'static str> {
-        self.acting.map(|(action, _)| action.message)
-    }
-
-    pub fn notice(&self) -> Option<&str> {
-        self.notices.front().map(String::as_str)
+    pub fn notice(&self) -> Option<&Notice> {
+        self.notices.front()
     }
 
     pub fn catch_up(&mut self, away: Duration) {
@@ -159,8 +169,11 @@ impl App {
         let levels = levels_of(pet);
         for ((skill, before), now) in Skill::ALL.iter().zip(self.levels).zip(levels) {
             if now > before {
-                self.notices
-                    .push_back(format!("reached {} {now}!", skill.name()));
+                self.notices.push_back(Notice {
+                    text: format!("reached {} {now}!", skill.name()),
+                    tone: Tone::Good,
+                });
+                self.acting = Some((Clip::Cheer, Duration::ZERO));
             }
         }
         self.levels = levels;
@@ -228,7 +241,12 @@ impl App {
                 if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
                     let points = pet.apply(action.effect);
                     pet.earn(points / POINTS_PER_XP);
-                    self.acting = Some((action, Duration::ZERO));
+                    self.acting = Some((action.clip, Duration::ZERO));
+                    self.notices.push_front(Notice {
+                        text: action.message.to_string(),
+                        tone: Tone::Plain,
+                    });
+                    self.notice_shown = Duration::ZERO;
                 }
             }
             _ => {}
@@ -268,8 +286,8 @@ impl App {
         }
         self.acting = self
             .acting
-            .map(|(action, played)| (action, played + elapsed))
-            .filter(|(action, played)| *played < self.chosen().animation(action.clip).duration());
+            .map(|(clip, played)| (clip, played + elapsed))
+            .filter(|(clip, played)| *played < self.chosen().animation(*clip).duration());
         self.announce_level_ups();
         if self.acting.is_none() && !self.notices.is_empty() {
             self.notice_shown += elapsed;
@@ -352,15 +370,22 @@ mod tests {
     use super::*;
     use crate::species;
 
+    const WAIT: Duration = Duration::from_secs(10);
+
+    fn shown(app: &App) -> Option<&str> {
+        app.notice().map(|notice| notice.text.as_str())
+    }
+
     #[test]
     fn an_action_plays_once_then_ends() {
         let species = species::builtin();
         let pet = Pet::new("Mochi", &species[0].name);
         let mut app = App::new(Some(pet), species, 0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
-        assert_eq!(app.message(), Some("munches happily."));
-        app.tick(Duration::from_secs(60));
-        assert_eq!(app.message(), None);
+        assert_eq!(shown(&app), Some("munches happily."));
+        app.tick(WAIT);
+        app.tick(WAIT);
+        assert_eq!(shown(&app), None);
     }
 
     #[test]
@@ -370,10 +395,10 @@ mod tests {
         let mut app = App::new(Some(pet), species, 0);
         app.on_key(KeyEvent::from(KeyCode::Char('f')));
         app.on_key(KeyEvent::from(KeyCode::Char('p')));
-        assert_eq!(app.message(), Some("munches happily."));
-        app.tick(Duration::from_secs(60));
+        assert_eq!(shown(&app), Some("munches happily."));
+        app.tick(WAIT);
         app.on_key(KeyEvent::from(KeyCode::Char('p')));
-        assert_eq!(app.message(), Some("loves the attention."));
+        assert_eq!(shown(&app), Some("loves the attention."));
     }
 
     #[test]
@@ -434,11 +459,12 @@ mod tests {
         pet.focus = Focus::One(Skill::Attack);
         pet.earn(20.0);
         app.tick(Duration::from_millis(100));
-        assert_eq!(app.notice(), Some("reached Hitpoints 9!"));
-        app.tick(NOTICE_TIME);
-        assert_eq!(app.notice(), Some("reached Attack 1!"));
-        app.tick(NOTICE_TIME);
-        assert_eq!(app.notice(), None);
+        assert_eq!(shown(&app), Some("reached Hitpoints 9!"));
+        assert_eq!(app.acting.map(|(clip, _)| clip), Some(Clip::Cheer));
+        app.tick(WAIT);
+        assert_eq!(shown(&app), Some("reached Attack 1!"));
+        app.tick(WAIT);
+        assert_eq!(shown(&app), None);
     }
 
     #[test]

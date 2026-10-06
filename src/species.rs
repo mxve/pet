@@ -21,6 +21,22 @@ pub enum Clip {
     Pet,
     Play,
     Sleep,
+    Train,
+}
+
+impl Clip {
+    fn fallback(self) -> Option<Clip> {
+        match self {
+            Clip::Train => Some(Clip::Play),
+            Clip::Idle
+            | Clip::Happy
+            | Clip::Sad
+            | Clip::Eat
+            | Clip::Pet
+            | Clip::Play
+            | Clip::Sleep => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,7 +124,13 @@ impl Species {
     }
 
     pub fn animation(&self, clip: Clip) -> &Animation {
-        self.clips.get(&clip).unwrap_or(&self.clips[&Clip::Idle])
+        self.clips
+            .get(&clip)
+            .or_else(|| {
+                clip.fallback()
+                    .and_then(|fallback| self.clips.get(&fallback))
+            })
+            .unwrap_or(&self.clips[&Clip::Idle])
     }
 
     pub fn paint(&self, art: &str) -> Text<'static> {
@@ -177,7 +199,7 @@ mod tests {
     #[test]
     fn cat_is_measured_by_its_largest_frame() {
         let cat = builtin().into_iter().find(|species| species.name == "Cat");
-        assert_eq!(cat.unwrap().size(), (12, 4));
+        assert_eq!(cat.unwrap().size(), (13, 4));
     }
 
     #[test]

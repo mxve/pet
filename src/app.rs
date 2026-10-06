@@ -4,7 +4,7 @@ use std::time::Duration;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
-use crate::pet::{Focus, Mood, Pet, Skill, Stats};
+use crate::pet::{Activity, Focus, Mood, Pet, Skill, Stats};
 use crate::species::{Clip, Species};
 
 const NAME_WIDTH: usize = 12;
@@ -109,6 +109,7 @@ impl App {
         }
         let clip = match pet.mood() {
             Mood::Asleep => Clip::Sleep,
+            Mood::Training => Clip::Train,
             Mood::Hungry | Mood::Bored | Mood::Tired => Clip::Sad,
             Mood::Content => Clip::Idle,
             Mood::Happy => Clip::Happy,
@@ -119,7 +120,8 @@ impl App {
     pub fn ongoing(&self) -> Option<char> {
         let (key, held) = match (self.acting, &self.pet) {
             (Some((action, played)), _) => (action.key, played),
-            (None, Some(pet)) if pet.asleep => ('s', self.clock),
+            (None, Some(pet)) if pet.activity == Activity::Asleep => ('s', self.clock),
+            (None, Some(pet)) if pet.activity == Activity::Training => ('r', self.clock),
             _ => return None,
         };
         let blink = held.as_millis() / ONGOING_BLINK.as_millis();
@@ -186,9 +188,8 @@ impl App {
                 };
             }
             _ if self.acting.is_some() => {}
-            KeyCode::Char('s') => {
-                pet.asleep = !pet.asleep;
-            }
+            KeyCode::Char('s') => pet.activity = toggled(pet.activity, Activity::Asleep),
+            KeyCode::Char('r') => pet.activity = toggled(pet.activity, Activity::Training),
             KeyCode::Char(character) => {
                 if let Some(action) = ACTIONS.iter().find(|action| action.key == character) {
                     let points = pet.apply(action.effect);
@@ -235,6 +236,14 @@ impl App {
             .acting
             .map(|(action, played)| (action, played + elapsed))
             .filter(|(action, played)| *played < self.chosen().animation(action.clip).duration());
+    }
+}
+
+fn toggled(current: Activity, wanted: Activity) -> Activity {
+    if current == wanted {
+        Activity::Awake
+    } else {
+        wanted
     }
 }
 
@@ -352,6 +361,21 @@ mod tests {
         app.start_dev();
         app.on_key(level_up);
         assert_eq!(app.pet.as_ref().unwrap().level(), 6);
+    }
+
+    #[test]
+    fn r_starts_and_stops_training() {
+        let species = species::builtin();
+        let pet = Pet::new("Mochi", &species[0].name);
+        let mut app = App::new(Some(pet), species, 0);
+        let activity = |app: &App| app.pet.as_ref().unwrap().activity;
+        app.on_key(KeyEvent::from(KeyCode::Char('r')));
+        assert_eq!(activity(&app), Activity::Training);
+        app.on_key(KeyEvent::from(KeyCode::Char('s')));
+        assert_eq!(activity(&app), Activity::Asleep);
+        app.on_key(KeyEvent::from(KeyCode::Char('r')));
+        app.on_key(KeyEvent::from(KeyCode::Char('r')));
+        assert_eq!(activity(&app), Activity::Awake);
     }
 
     #[test]

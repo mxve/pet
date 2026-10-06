@@ -12,6 +12,7 @@ const LEVELS_PER_DOUBLING: f64 = 7.0;
 const MAX_LEVEL: u32 = 99;
 const ALL_SKILLS_SHARE: f32 = 0.1;
 const ASLEEP_XP_PER_HOUR: f32 = 1.0;
+const TRAINING_XP_PER_HOUR: f32 = 30.0;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
     joy: -6.0,
@@ -21,6 +22,11 @@ const ASLEEP_RATE_PER_HOUR: Stats = Stats {
     food: -3.0,
     joy: 0.0,
     energy: 25.0,
+};
+const TRAINING_RATE_PER_HOUR: Stats = Stats {
+    food: -20.0,
+    joy: -6.0,
+    energy: -40.0,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -51,11 +57,20 @@ impl Stats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mood {
     Asleep,
+    Training,
     Hungry,
     Bored,
     Tired,
     Content,
     Happy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Activity {
+    Awake,
+    Asleep,
+    Training,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -117,7 +132,7 @@ pub struct Pet {
     pub name: String,
     pub species: String,
     pub stats: Stats,
-    pub asleep: bool,
+    pub activity: Activity,
     pub skills: BTreeMap<Skill, f32>,
     pub focus: Focus,
     pub last_seen: u64,
@@ -133,7 +148,7 @@ impl Pet {
                 joy: FULL,
                 energy: FULL,
             },
-            asleep: false,
+            activity: Activity::Awake,
             skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
             focus: Focus::One(Skill::Hitpoints),
             last_seen: 0,
@@ -143,7 +158,9 @@ impl Pet {
     pub fn apply(&mut self, effect: Stats) -> f32 {
         let before = self.stats;
         self.stats = self.stats.shifted(effect);
-        self.asleep = false;
+        if self.activity == Activity::Asleep {
+            self.activity = Activity::Awake;
+        }
         let gain = |now: f32, then: f32| (now - then).max(0.0);
         gain(self.stats.food, before.food)
             + gain(self.stats.joy, before.joy)
@@ -152,17 +169,19 @@ impl Pet {
 
     pub fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
-        let rate = if self.asleep {
-            ASLEEP_RATE_PER_HOUR
-        } else {
-            AWAKE_RATE_PER_HOUR
+        let (rate, xp_per_hour) = match self.activity {
+            Activity::Awake => (AWAKE_RATE_PER_HOUR, 0.0),
+            Activity::Asleep => (ASLEEP_RATE_PER_HOUR, ASLEEP_XP_PER_HOUR),
+            Activity::Training => (TRAINING_RATE_PER_HOUR, TRAINING_XP_PER_HOUR),
         };
         self.stats = self.stats.shifted(rate.scaled(hours));
-        if self.asleep {
-            self.earn(ASLEEP_XP_PER_HOUR * hours);
-        }
-        if self.stats.energy >= FULL {
-            self.asleep = false;
+        self.earn(xp_per_hour * hours);
+        let rested = self.stats.energy >= FULL;
+        let spent = self.stats.food <= 0.0 || self.stats.energy <= 0.0;
+        match self.activity {
+            Activity::Asleep if rested => self.activity = Activity::Awake,
+            Activity::Training if spent => self.activity = Activity::Awake,
+            Activity::Awake | Activity::Asleep | Activity::Training => {}
         }
     }
 
@@ -214,8 +233,10 @@ impl Pet {
     pub fn mood(&self) -> Mood {
         let Stats { food, joy, energy } = self.stats;
         let lowest = food.min(joy).min(energy);
-        if self.asleep {
+        if self.activity == Activity::Asleep {
             Mood::Asleep
+        } else if self.activity == Activity::Training {
+            Mood::Training
         } else if lowest >= HIGH {
             Mood::Happy
         } else if lowest >= LOW {
@@ -307,13 +328,13 @@ mod tests {
     fn sleeping_restores_energy_then_wakes() {
         let mut pet = Pet::new("Mochi", "Cat");
         pet.stats.energy = 10.0;
-        pet.asleep = true;
+        pet.activity = Activity::Asleep;
         pet.tick(Duration::from_secs(3600));
         assert_eq!(pet.stats.energy, 35.0);
         assert_eq!(pet.mood(), Mood::Asleep);
         pet.tick(Duration::from_secs(3600 * 3));
         assert_eq!(pet.stats.energy, FULL);
-        assert!(!pet.asleep);
+        assert_eq!(pet.activity, Activity::Awake);
     }
 
     #[test]
@@ -341,6 +362,19 @@ mod tests {
     }
 
     #[test]
+    fn training_earns_xp_until_food_or_energy_runs_out() {
+        let mut pet = Pet::new("Mochi", "Cat");
+        pet.activity = Activity::Training;
+        pet.tick(Duration::from_secs(3600));
+        assert_eq!(pet.xp(Skill::Hitpoints), 30.0);
+        assert_eq!((pet.stats.food, pet.stats.energy), (80.0, 60.0));
+        pet.advance(Duration::from_secs(10 * 3600));
+        assert_eq!(pet.activity, Activity::Awake);
+        assert_eq!(pet.stats.energy, 0.0);
+        assert!(pet.xp(Skill::Hitpoints) < 80.0);
+    }
+
+    #[test]
     fn the_level_is_every_skill_added_up() {
         let mut pet = Pet::new("Mochi", "Cat");
         assert_eq!(pet.level(), 5);
@@ -352,7 +386,7 @@ mod tests {
     fn sleeping_earns_a_little_xp() {
         let mut pet = Pet::new("Mochi", "Cat");
         pet.stats.energy = 0.0;
-        pet.asleep = true;
+        pet.activity = Activity::Asleep;
         pet.advance(Duration::from_secs(150 * 60));
         assert!((pet.xp(Skill::Hitpoints) - 2.5).abs() < 0.01);
         let mut awake = Pet::new("Mochi", "Cat");
@@ -365,7 +399,7 @@ mod tests {
         let tired = || {
             let mut pet = Pet::new("Mochi", "Cat");
             pet.stats.energy = 10.0;
-            pet.asleep = true;
+            pet.activity = Activity::Asleep;
             pet
         };
         let mut caught_up = tired();
@@ -375,6 +409,6 @@ mod tests {
             ticked.tick(Duration::from_secs(60));
         }
         assert_eq!(caught_up, ticked);
-        assert!(!caught_up.asleep);
+        assert_eq!(caught_up.activity, Activity::Awake);
     }
 }

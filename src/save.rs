@@ -42,13 +42,13 @@ pub fn store(pet: &mut Pet) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::pet::Pet;
+    use crate::pet::{Activity, Pet};
 
     #[test]
     fn a_pet_survives_the_save_format() {
         let mut pet = Pet::new("Mochi", "Cat");
         pet.stats.food = 12.5;
-        pet.asleep = true;
+        pet.activity = Activity::Asleep;
         let saved = toml::to_string(&pet).unwrap();
         assert_eq!(toml::from_str::<Pet>(&saved).unwrap(), pet);
     }

@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen};
 use crate::bar;
-use crate::pet::{self, Focus, Mood, Pet, Skill};
+use crate::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use crate::random::roll;
 use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
@@ -87,14 +87,19 @@ fn draw_home(frame: &mut Frame, app: &App) {
         Span::styled(format!("{} the {}", pet.name, species.name), species.color),
         Span::styled(format!(" | Lv {}", pet.level()), TEXT),
     ];
-    let border = if pet.asleep { MUTED } else { LAVENDER };
+    let border = if pet.activity == Activity::Asleep {
+        MUTED
+    } else {
+        LAVENDER
+    };
+    let menu = help([('k', "skills"), ('q', "quit")], None);
+    let inside = card(frame, heading, border, &decoration(pet.mood()), menu);
+    let [stage, status, _, food, joy, energy, care] = stage_rows(inside);
     let keys = ACTIONS
         .iter()
         .map(|action| (action.key, action.label))
-        .chain([('s', "sleep"), ('k', "skills"), ('q', "quit")]);
-    let help = help(keys, app.ongoing());
-    let inside = card(frame, heading, border, &decoration(pet.mood()), help);
-    let [stage, status, _, food, joy, energy, _] = stage_rows(inside);
+        .chain([('r', "train"), ('s', "sleep")]);
+    frame.render_widget(help(keys, app.ongoing()).centered(), care);
 
     draw_pet(frame, species, app.frame(pet), stage);
 
@@ -354,6 +359,11 @@ fn decoration(mood: Mood) -> Decoration {
             ornament: ["✿", "⋆"],
             color: MINT,
         },
+        Mood::Training => Decoration {
+            title: ["✧", "✧"],
+            ornament: ["+", "."],
+            color: PEACH,
+        },
         Mood::Asleep => Decoration {
             title: ["☾", "⋆"],
             ornament: ["⋆", "."],
@@ -370,6 +380,7 @@ fn decoration(mood: Mood) -> Decoration {
 fn mood_status(mood: Mood) -> (&'static str, Color) {
     match mood {
         Mood::Asleep => ("is fast asleep.", TEXT),
+        Mood::Training => ("is training hard.", TEXT),
         Mood::Hungry => ("is hungry.", ROSE),
         Mood::Bored => ("is bored.", ROSE),
         Mood::Tired => ("is sleepy.", ROSE),

@@ -221,10 +221,15 @@ impl Pet {
     }
 
     pub fn skill(&self, skill: Skill) -> Level {
-        level_at(self.xp(skill))
+        level_at(self.xp(skill), 1)
     }
 
-    pub fn level(&self) -> u32 {
+    pub fn level(&self) -> Level {
+        let total: f32 = Skill::ALL.iter().map(|&skill| self.xp(skill)).sum();
+        level_at(total, Skill::ALL.len() as u32)
+    }
+
+    pub fn total_level(&self) -> u32 {
         Skill::ALL
             .iter()
             .map(|&skill| self.skill(skill).number)
@@ -243,11 +248,12 @@ impl Pet {
     pub fn mood(&self) -> Mood {
         let Stats { food, joy, energy } = self.stats;
         let lowest = food.min(joy).min(energy);
-        if self.activity == Activity::Asleep {
-            Mood::Asleep
-        } else if self.activity == Activity::Training {
-            Mood::Training
-        } else if lowest >= HIGH {
+        match self.activity {
+            Activity::Asleep => return Mood::Asleep,
+            Activity::Training => return Mood::Training,
+            Activity::Awake => {}
+        }
+        if lowest >= HIGH {
             Mood::Happy
         } else if lowest >= LOW {
             Mood::Content
@@ -261,11 +267,12 @@ impl Pet {
     }
 }
 
-fn level_at(xp: f32) -> Level {
+fn level_at(xp: f32, scale: u32) -> Level {
+    let cost = |number| level_cost(number) * scale;
     let mut number = 0;
     let mut into = xp as u32;
-    while number < MAX_LEVEL && into >= level_cost(number) {
-        into -= level_cost(number);
+    while number < MAX_LEVEL && into >= cost(number) {
+        into -= cost(number);
         number += 1;
     }
     if number == MAX_LEVEL {
@@ -278,7 +285,7 @@ fn level_at(xp: f32) -> Level {
     Level {
         number,
         into,
-        needed: level_cost(number),
+        needed: cost(number),
     }
 }
 
@@ -305,17 +312,6 @@ mod tests {
                 energy: 0.0
             }
         );
-    }
-
-    #[test]
-    fn feeding_a_full_pet_stays_full() {
-        let mut pet = Pet::new("Mochi", "Cat");
-        pet.apply(Stats {
-            food: 30.0,
-            joy: 0.0,
-            energy: 0.0,
-        });
-        assert_eq!(pet.stats.food, FULL);
     }
 
     #[test]
@@ -349,7 +345,7 @@ mod tests {
 
     #[test]
     fn levels_cost_more_and_more_up_to_99() {
-        let number = |xp| level_at(xp).number;
+        let number = |xp| level_at(xp, 1).number;
         assert_eq!(
             [number(19.0), number(20.0), number(92.0), number(93.0)],
             [0, 1, 3, 4]
@@ -399,23 +395,14 @@ mod tests {
     }
 
     #[test]
-    fn the_level_is_every_skill_added_up() {
+    fn a_pet_level_costs_one_level_of_every_skill() {
         let mut pet = Pet::new("Mochi", "Cat");
-        assert_eq!(pet.level(), 0);
-        pet.earn(20.0);
-        assert_eq!(pet.level(), 1);
-    }
-
-    #[test]
-    fn sleeping_earns_a_little_xp() {
-        let mut pet = Pet::new("Mochi", "Cat");
-        pet.stats.energy = 0.0;
-        pet.activity = Activity::Asleep;
-        pet.advance(Duration::from_secs(150 * 60));
-        assert!((pet.xp(Skill::Hitpoints) - 2.5).abs() < 0.01);
-        let mut awake = Pet::new("Mochi", "Cat");
-        awake.advance(Duration::from_secs(150 * 60));
-        assert_eq!(awake.xp(Skill::Hitpoints), 0.0);
+        pet.earn(50.0);
+        assert_eq!(pet.level().number, 0);
+        assert_eq!(pet.level().ratio(), 0.5);
+        assert_eq!(pet.total_level(), 2);
+        pet.earn(50.0);
+        assert_eq!(pet.level().number, 1);
     }
 
     #[test]

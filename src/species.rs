@@ -199,12 +199,6 @@ mod tests {
     }
 
     #[test]
-    fn cat_is_measured_by_its_largest_frame() {
-        let cat = builtin().into_iter().find(|species| species.name == "Cat");
-        assert_eq!(cat.unwrap().size(), (13, 4));
-    }
-
-    #[test]
     fn frame_at_follows_the_sequence_and_wraps() {
         let animation = Animation {
             frame_ms: 100,

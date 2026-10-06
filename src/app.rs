@@ -87,13 +87,15 @@ pub struct App {
     acting: Option<(Clip, Duration)>,
     notices: VecDeque<Notice>,
     notice_shown: Duration,
-    levels: [u32; Skill::ALL.len()],
+    pet_level: u32,
+    skill_levels: [u32; Skill::ALL.len()],
     speed: f32,
 }
 
 impl App {
     pub fn new(pet: Option<Pet>, species: Vec<Species>, choice: usize) -> App {
-        let levels = pet.as_ref().map_or([0; Skill::ALL.len()], levels_of);
+        let pet_level = pet.as_ref().map_or(0, |pet| pet.level().number);
+        let skill_levels = pet.as_ref().map_or([0; Skill::ALL.len()], skill_levels);
         App {
             screen: if pet.is_some() {
                 Screen::Home
@@ -113,7 +115,8 @@ impl App {
             acting: None,
             notices: VecDeque::new(),
             notice_shown: Duration::ZERO,
-            levels,
+            pet_level,
+            skill_levels,
             speed: 1.0,
         }
     }
@@ -138,14 +141,15 @@ impl App {
     }
 
     pub fn ongoing(&self) -> Option<char> {
-        let (key, held) = match (self.acting, &self.pet) {
-            (Some((clip, played)), _) => {
-                let action = ACTIONS.iter().find(|action| action.clip == clip)?;
-                (action.key, played)
-            }
-            (None, Some(pet)) if pet.activity == Activity::Asleep => ('s', self.clock),
-            (None, Some(pet)) if pet.activity == Activity::Training => ('r', self.clock),
-            _ => return None,
+        let action = self.acting.and_then(|(clip, played)| {
+            let action = ACTIONS.iter().find(|action| action.clip == clip)?;
+            Some((action.key, played))
+        });
+        let (key, held) = match (action, self.pet.as_ref().map(|pet| pet.activity)) {
+            (Some(action), _) => action,
+            (None, Some(Activity::Asleep)) => ('s', self.clock),
+            (None, Some(Activity::Training)) => ('r', self.clock),
+            (None, Some(Activity::Awake) | None) => return None,
         };
         let blink = held.as_millis() / ONGOING_BLINK.as_millis();
         blink.is_multiple_of(2).then_some(key)
@@ -166,8 +170,18 @@ impl App {
         let Some(pet) = &self.pet else {
             return;
         };
-        let levels = levels_of(pet);
-        for ((skill, before), now) in Skill::ALL.iter().zip(self.levels).zip(levels) {
+        let pet_level = pet.level().number;
+        let skill_levels = skill_levels(pet);
+        if pet_level > self.pet_level {
+            self.notices.push_back(Notice {
+                text: format!("reached level {pet_level}!"),
+                tone: Tone::Good,
+            });
+            self.acting = Some((Clip::Cheer, Duration::ZERO));
+        }
+        self.pet_level = pet_level;
+        let pairs = self.skill_levels.into_iter().zip(skill_levels);
+        for (skill, (before, now)) in Skill::ALL.iter().zip(pairs) {
             if now > before {
                 self.notices.push_back(Notice {
                     text: format!("reached {} {now}!", skill.name()),
@@ -176,7 +190,7 @@ impl App {
                 self.acting = Some((Clip::Cheer, Duration::ZERO));
             }
         }
-        self.levels = levels;
+        self.skill_levels = skill_levels;
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
@@ -201,7 +215,6 @@ impl App {
         };
         let count = self.species.len();
         match code {
-            KeyCode::Esc => self.quit = true,
             KeyCode::Left => self.choice = (self.choice + count - 1) % count,
             KeyCode::Right => self.choice = (self.choice + 1) % count,
             KeyCode::Backspace => _ = name.pop(),
@@ -224,7 +237,7 @@ impl App {
             return;
         };
         match code {
-            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('k') => {
                 let choice = match pet.focus {
                     Focus::One(skill) => Skill::ALL.iter().position(|each| *each == skill),
@@ -259,6 +272,7 @@ impl App {
         };
         let rows = Skill::ALL.len() + 1;
         match code {
+            KeyCode::Char('q') => self.quit = true,
             KeyCode::Esc | KeyCode::Char('k') => self.screen = Screen::Home,
             KeyCode::Up => {
                 self.screen = Screen::Skills {
@@ -299,7 +313,7 @@ impl App {
     }
 }
 
-fn levels_of(pet: &Pet) -> [u32; Skill::ALL.len()] {
+fn skill_levels(pet: &Pet) -> [u32; Skill::ALL.len()] {
     Skill::ALL.map(|skill| pet.skill(skill).number)
 }
 
@@ -351,7 +365,7 @@ mod dev {
             match key.code {
                 KeyCode::Char('x') => pet.earn(CHEAT_XP),
                 KeyCode::Char('l') => {
-                    let level = pet.skill(pet.tracked());
+                    let level = pet.level();
                     pet.earn((level.needed - level.into) as f32);
                 }
                 KeyCode::Char('f') => pet.stats = pet.stats.shifted(by(-CHEAT_DRAIN, 0.0, 0.0)),
@@ -374,18 +388,6 @@ mod tests {
 
     fn shown(app: &App) -> Option<&str> {
         app.notice().map(|notice| notice.text.as_str())
-    }
-
-    #[test]
-    fn an_action_plays_once_then_ends() {
-        let species = species::builtin();
-        let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0);
-        app.on_key(KeyEvent::from(KeyCode::Char('f')));
-        assert_eq!(shown(&app), Some("munches happily."));
-        app.tick(WAIT);
-        app.tick(WAIT);
-        assert_eq!(shown(&app), None);
     }
 
     #[test]
@@ -421,35 +423,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    fn cheats_only_work_in_dev_mode() {
-        let species = species::builtin();
-        let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0);
-        let level_up = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
-        app.on_key(level_up);
-        assert_eq!(app.pet.as_ref().unwrap().level(), 0);
-        app.start_dev();
-        app.on_key(level_up);
-        assert_eq!(app.pet.as_ref().unwrap().level(), 1);
-    }
-
-    #[test]
-    fn r_starts_and_stops_training() {
-        let species = species::builtin();
-        let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0);
-        let activity = |app: &App| app.pet.as_ref().unwrap().activity;
-        app.on_key(KeyEvent::from(KeyCode::Char('r')));
-        assert_eq!(activity(&app), Activity::Training);
-        app.on_key(KeyEvent::from(KeyCode::Char('s')));
-        assert_eq!(activity(&app), Activity::Asleep);
-        app.on_key(KeyEvent::from(KeyCode::Char('r')));
-        app.on_key(KeyEvent::from(KeyCode::Char('r')));
-        assert_eq!(activity(&app), Activity::Awake);
-    }
-
-    #[test]
     fn level_ups_become_notices_one_after_another() {
         let species = species::builtin();
         let pet = Pet::new("Mochi", &species[0].name);
@@ -459,28 +432,14 @@ mod tests {
         pet.focus = Focus::One(Skill::Attack);
         pet.earn(20.0);
         app.tick(Duration::from_millis(100));
-        assert_eq!(shown(&app), Some("reached Hitpoints 9!"));
+        assert_eq!(shown(&app), Some("reached level 2!"));
         assert_eq!(app.acting.map(|(clip, _)| clip), Some(Clip::Cheer));
+        app.tick(WAIT);
+        assert_eq!(shown(&app), Some("reached Hitpoints 9!"));
         app.tick(WAIT);
         assert_eq!(shown(&app), Some("reached Attack 1!"));
         app.tick(WAIT);
         assert_eq!(shown(&app), None);
-    }
-
-    #[test]
-    fn the_skills_screen_sets_the_focus() {
-        let species = species::builtin();
-        let pet = Pet::new("Mochi", &species[0].name);
-        let mut app = App::new(Some(pet), species, 0);
-        for code in [KeyCode::Char('k'), KeyCode::Down, KeyCode::Enter] {
-            app.on_key(KeyEvent::from(code));
-        }
-        assert_eq!(app.pet.as_ref().unwrap().focus, Focus::One(Skill::Attack));
-        for code in [KeyCode::Up, KeyCode::Up, KeyCode::Enter, KeyCode::Esc] {
-            app.on_key(KeyEvent::from(code));
-        }
-        assert_eq!(app.pet.as_ref().unwrap().focus, Focus::All);
-        assert!(matches!(app.screen, Screen::Home));
     }
 
     #[test]

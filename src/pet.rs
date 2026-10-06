@@ -11,6 +11,7 @@ const LEVEL_BASE_XP: f64 = 20.0;
 const LEVELS_PER_DOUBLING: f64 = 7.0;
 const MAX_LEVEL: u32 = 99;
 const ALL_SKILLS_SHARE: f32 = 0.1;
+const HAPPY_XP_PER_HOUR: f32 = 2.0;
 const ASLEEP_XP_PER_HOUR: f32 = 1.0;
 const TRAINING_XP_PER_HOUR: f32 = 30.0;
 const STAMINA_SAVING_PER_LEVEL: f32 = 0.01;
@@ -174,6 +175,7 @@ impl Pet {
     pub fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
         let (mut rate, xp_per_hour) = match self.activity {
+            Activity::Awake if self.mood() == Mood::Happy => (AWAKE_RATE_PER_HOUR, HAPPY_XP_PER_HOUR),
             Activity::Awake => (AWAKE_RATE_PER_HOUR, 0.0),
             Activity::Asleep => (ASLEEP_RATE_PER_HOUR, ASLEEP_XP_PER_HOUR),
             Activity::Training => (TRAINING_RATE_PER_HOUR, TRAINING_XP_PER_HOUR),

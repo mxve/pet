@@ -1,10 +1,9 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::Result;
-use pet_core::pet::Pet;
 use pet_core::world::World;
 
 pub fn path() -> Result<PathBuf> {
@@ -12,43 +11,43 @@ pub fn path() -> Result<PathBuf> {
     Ok(home.join(".pet").join("save.toml"))
 }
 
-pub fn load() -> Result<Option<Pet>> {
+pub fn load() -> Result<Option<World>> {
     let path = path()?;
     let source = match fs::read_to_string(&path) {
         Ok(source) => source,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("{}: {error}", path.display()).into()),
     };
-    let pet = toml::from_str(&source).map_err(|error| format!("{}: {error}", path.display()))?;
-    Ok(Some(pet))
+    let world = toml::from_str(&source).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(Some(world))
 }
 
-pub fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs())
+pub fn now() -> Duration {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()
 }
 
-pub fn store(world: &mut World) -> Result<()> {
-    world.stamp(now());
+pub fn store(world: &World) -> Result<()> {
     let path = path()?;
     let temporary = path.with_extension("toml.tmp");
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder)?;
     }
-    fs::write(&temporary, toml::to_string(world.pet())?)?;
+    fs::write(&temporary, toml::to_string(world)?)?;
     fs::rename(&temporary, &path)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use pet_core::pet::{Activity, Pet};
+    use std::time::Duration;
+
+    use pet_core::pet::Pet;
+    use pet_core::world::World;
 
     #[test]
-    fn a_pet_survives_the_save_format() {
-        let mut pet = Pet::new("Mochi", "Cat");
-        pet.stats.food = 12.5;
-        pet.activity = Activity::Asleep;
-        let saved = toml::to_string(&pet).unwrap();
-        assert_eq!(toml::from_str::<Pet>(&saved).unwrap(), pet);
+    fn a_world_survives_the_save_format() {
+        let world = World::new(Pet::new("Mochi", "Cat"), Duration::from_secs(1_759_000_000));
+        let saved = toml::to_string(&world).unwrap();
+        assert_eq!(toml::from_str::<World>(&saved).unwrap(), world);
     }
 }

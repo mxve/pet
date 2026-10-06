@@ -22,20 +22,19 @@ fn main() -> Result<()> {
     #[cfg(not(debug_assertions))]
     let dev = false;
     let species = species::builtin();
-    let pet = if dev { None } else { save::load()? };
+    let world = if dev { None } else { save::load()? };
     let mut choice = 0;
-    let mut away = Duration::ZERO;
-    if let Some(pet) = &pet {
+    if let Some(world) = &world {
+        let pet = world.pet();
         let known = species.iter().position(|species| species.name == pet.species);
         let Some(known) = known else {
             let path = save::path()?;
             return Err(format!("{}: unknown species \"{}\"", path.display(), pet.species).into());
         };
         choice = known;
-        away = Duration::from_secs(save::now().saturating_sub(pet.last_seen));
     }
-    let mut app = App::new(pet, species, choice);
-    app.catch_up(away);
+    let mut app = App::new(world, species, choice, save::now());
+    app.catch_up();
     #[cfg(debug_assertions)]
     if dev {
         app.start_dev();

@@ -142,7 +142,6 @@ pub struct Pet {
     pub activity: Activity,
     pub skills: BTreeMap<Skill, f32>,
     pub focus: Focus,
-    pub last_seen: u64,
 }
 
 impl Pet {
@@ -158,7 +157,6 @@ impl Pet {
             activity: Activity::Awake,
             skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
             focus: Focus::One(Skill::Hitpoints),
-            last_seen: 0,
         }
     }
 

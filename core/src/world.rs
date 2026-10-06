@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::pet::{Activity, Focus, Pet, Skill, Stats};
 
@@ -108,18 +108,22 @@ pub struct Outcome {
     pub events: Vec<Event>,
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct World {
     pet: Pet,
-    busy_until: Duration,
+    last_seen: Duration,
     revision: u64,
+    #[serde(skip)]
+    busy_until: Duration,
 }
 
 impl World {
-    pub fn new(pet: Pet) -> World {
+    pub fn new(pet: Pet, now: Duration) -> World {
         World {
             pet,
-            busy_until: Duration::ZERO,
+            last_seen: now,
             revision: 0,
+            busy_until: Duration::ZERO,
         }
     }
 
@@ -129,10 +133,6 @@ impl World {
 
     pub fn revision(&self) -> u64 {
         self.revision
-    }
-
-    pub fn stamp(&mut self, now: u64) {
-        self.pet.last_seen = now;
     }
 
     pub fn apply(&mut self, command: Command, now: Duration) -> Result<Outcome, Refusal> {
@@ -164,17 +164,11 @@ impl World {
         Ok(outcome)
     }
 
-    pub fn tick(&mut self, elapsed: Duration) -> Vec<Event> {
-        self.passing(|pet| pet.tick(elapsed))
-    }
-
-    pub fn advance(&mut self, elapsed: Duration) -> Vec<Event> {
-        self.passing(|pet| pet.advance(elapsed))
-    }
-
-    fn passing(&mut self, time: impl FnOnce(&mut Pet)) -> Vec<Event> {
+    pub fn catch_up(&mut self, now: Duration) -> Vec<Event> {
+        let away = now.saturating_sub(self.last_seen);
+        self.last_seen = self.last_seen.max(now);
         let was_training = self.pet.activity == Activity::Training;
-        let mut events = self.changing(time);
+        let mut events = self.changing(|pet| pet.advance(away));
         if was_training && self.pet.activity != Activity::Training {
             events.push(Event::TrainingEnded);
         }
@@ -240,7 +234,7 @@ mod tests {
 
     #[test]
     fn actions_wait_for_the_one_playing() {
-        let mut world = World::new(Pet::new("Mochi", "Cat"));
+        let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
         assert!(world.apply(Command::Act('f'), Duration::ZERO).is_ok());
         assert_eq!(world.apply(Command::Act('p'), SECOND), Err(Refusal::Busy));
         assert!(world.apply(Command::Act('p'), 3 * SECOND).is_ok());
@@ -248,7 +242,7 @@ mod tests {
 
     #[test]
     fn only_care_that_helps_earns_xp() {
-        let mut world = World::new(Pet::new("Mochi", "Cat"));
+        let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
         world.pet.stats.food = 0.0;
         world.apply(Command::Act('f'), Duration::ZERO).unwrap();
         assert_eq!(world.pet.xp(Skill::Hitpoints), 6.0);
@@ -259,7 +253,7 @@ mod tests {
 
     #[test]
     fn level_ups_come_out_as_events_in_order() {
-        let mut world = World::new(Pet::new("Mochi", "Cat"));
+        let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
         let events = world.changing(|pet| {
             pet.earn(300.0);
             pet.focus = Focus::One(Skill::Attack);

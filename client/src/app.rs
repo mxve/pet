@@ -36,6 +36,7 @@ pub struct App {
     pub choice: usize,
     pub screen: Screen,
     pub clock: Duration,
+    time: Duration,
     pub seed: u64,
     pub quit: bool,
     #[cfg(debug_assertions)]
@@ -47,17 +48,18 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(pet: Option<Pet>, species: Vec<Species>, choice: usize) -> App {
+    pub fn new(world: Option<World>, species: Vec<Species>, choice: usize, now: Duration) -> App {
         App {
-            screen: if pet.is_some() {
+            screen: if world.is_some() {
                 Screen::Home
             } else {
                 Screen::Adopt { name: String::new() }
             },
-            world: pet.map(World::new),
+            world,
             species,
             choice,
             clock: Duration::ZERO,
+            time: now,
             seed: RandomState::new().hash_one(0),
             quit: false,
             #[cfg(debug_assertions)]
@@ -111,8 +113,8 @@ impl App {
         self.notices.front()
     }
 
-    pub fn catch_up(&mut self, away: Duration) {
-        let events = self.world.as_mut().map(|world| world.advance(away)).unwrap_or_default();
+    pub fn catch_up(&mut self) {
+        let events = self.world.as_mut().map(|world| world.catch_up(self.time)).unwrap_or_default();
         self.announce(events);
     }
 
@@ -120,7 +122,7 @@ impl App {
         let Some(world) = &mut self.world else {
             return;
         };
-        let Ok(outcome) = world.apply(command, self.clock) else {
+        let Ok(outcome) = world.apply(command, self.time) else {
             return;
         };
         if let Some(clip) = outcome.clip {
@@ -183,7 +185,7 @@ impl App {
             }
             KeyCode::Enter if !name.trim().is_empty() => {
                 let pet = Pet::new(name.trim(), &self.species[self.choice].name);
-                self.world = Some(World::new(pet));
+                self.world = Some(World::new(pet, self.time));
                 self.screen = Screen::Home;
             }
             _ => {}
@@ -239,16 +241,12 @@ impl App {
 
     pub fn tick(&mut self, elapsed: Duration) {
         self.clock += elapsed;
-        let events = self
-            .world
-            .as_mut()
-            .map(|world| world.tick(elapsed.mul_f32(self.speed)))
-            .unwrap_or_default();
+        self.time += elapsed.mul_f32(self.speed);
+        self.catch_up();
         self.acting = self
             .acting
             .map(|(clip, played)| (clip, played + elapsed))
             .filter(|(clip, played)| *played < self.chosen().animation(*clip).duration());
-        self.announce(events);
         if self.acting.is_none() && !self.notices.is_empty() {
             self.notice_shown += elapsed;
             if self.notice_shown >= NOTICE_TIME {
@@ -319,7 +317,7 @@ mod tests {
 
     #[test]
     fn adopting_needs_a_name_and_any_letter_types() {
-        let mut app = App::new(None, species::builtin(), 0);
+        let mut app = App::new(None, species::builtin(), 0, Duration::ZERO);
         let mut press = |codes: &[KeyCode]| {
             for &code in codes {
                 app.on_key(KeyEvent::from(code));

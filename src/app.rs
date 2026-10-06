@@ -4,7 +4,7 @@ use std::time::Duration;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
-use crate::pet::{Mood, Pet, Stats};
+use crate::pet::{Focus, Mood, Pet, Skill, Stats};
 use crate::species::{Clip, Species};
 
 const NAME_WIDTH: usize = 12;
@@ -58,6 +58,7 @@ pub const ACTIONS: &[Action] = &[
 pub enum Screen {
     Adopt { name: String },
     Home,
+    Skills { choice: usize },
 }
 
 pub struct App {
@@ -141,6 +142,7 @@ impl App {
         match self.screen {
             Screen::Adopt { .. } => self.on_adopt_key(key.code),
             Screen::Home => self.on_home_key(key.code),
+            Screen::Skills { choice } => self.on_skills_key(key.code, choice),
         }
     }
 
@@ -174,6 +176,15 @@ impl App {
         };
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            KeyCode::Char('k') => {
+                let choice = match pet.focus {
+                    Focus::One(skill) => Skill::ALL.iter().position(|each| *each == skill),
+                    Focus::All => None,
+                };
+                self.screen = Screen::Skills {
+                    choice: choice.unwrap_or(Skill::ALL.len()),
+                };
+            }
             _ if self.acting.is_some() => {}
             KeyCode::Char('s') => {
                 pet.asleep = !pet.asleep;
@@ -184,6 +195,32 @@ impl App {
                     pet.earn(points / POINTS_PER_XP);
                     self.acting = Some((action, Duration::ZERO));
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_skills_key(&mut self, code: KeyCode, choice: usize) {
+        let Some(pet) = &mut self.pet else {
+            return;
+        };
+        let rows = Skill::ALL.len() + 1;
+        match code {
+            KeyCode::Esc | KeyCode::Char('k') => self.screen = Screen::Home,
+            KeyCode::Up => {
+                self.screen = Screen::Skills {
+                    choice: (choice + rows - 1) % rows,
+                }
+            }
+            KeyCode::Down => {
+                self.screen = Screen::Skills {
+                    choice: (choice + 1) % rows,
+                }
+            }
+            KeyCode::Enter => {
+                pet.focus = Skill::ALL
+                    .get(choice)
+                    .map_or(Focus::All, |&skill| Focus::One(skill));
             }
             _ => {}
         }
@@ -258,7 +295,6 @@ mod dev {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pet::Skill;
     use crate::species;
 
     #[test]
@@ -316,6 +352,22 @@ mod tests {
         app.start_dev();
         app.on_key(level_up);
         assert_eq!(app.pet.as_ref().unwrap().level(), 6);
+    }
+
+    #[test]
+    fn the_skills_screen_sets_the_focus() {
+        let species = species::builtin();
+        let pet = Pet::new("Mochi", &species[0].name);
+        let mut app = App::new(Some(pet), species, 0);
+        for code in [KeyCode::Char('k'), KeyCode::Down, KeyCode::Enter] {
+            app.on_key(KeyEvent::from(code));
+        }
+        assert_eq!(app.pet.as_ref().unwrap().focus, Focus::One(Skill::Attack));
+        for code in [KeyCode::Up, KeyCode::Up, KeyCode::Enter, KeyCode::Esc] {
+            app.on_key(KeyEvent::from(code));
+        }
+        assert_eq!(app.pet.as_ref().unwrap().focus, Focus::All);
+        assert!(matches!(app.screen, Screen::Home));
     }
 
     #[test]

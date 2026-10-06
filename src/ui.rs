@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{ACTIONS, App, Screen};
 use crate::bar;
-use crate::pet::{self, Mood};
+use crate::pet::{self, Focus, Mood, Pet, Skill};
 use crate::random::roll;
 use crate::species::{Clip, Species};
 use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
@@ -17,6 +17,11 @@ use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
 const CARD_WIDTH: u16 = 49;
 const CARD_HEIGHT: u16 = 14;
 const CARD_PADDING: u16 = 3;
+const SKILL_LIST_TOP: u16 = 2;
+const SKILL_ROWS: usize = 8;
+const SKILL_NAME_WIDTH: u16 = 13;
+const SKILL_LEVEL_WIDTH: u16 = 4;
+const SKILL_XP_WIDTH: u16 = 14;
 const NOISE: [&str; 4] = [".", "+", "⋆", "✧"];
 const NOISE_DENSITY: u64 = 60;
 const NOISE_PERIOD: Duration = Duration::from_secs(4);
@@ -38,6 +43,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     match &app.screen {
         Screen::Adopt { name } => draw_adopt(frame, app, name),
         Screen::Home => draw_home(frame, app),
+        Screen::Skills { choice } => draw_skills(frame, app, *choice),
     }
     #[cfg(debug_assertions)]
     if app.dev {
@@ -49,7 +55,8 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     let species = app.chosen();
     let heading = vec![Span::styled("adopt a pet", species.color)];
     let keys = [("<- ->", "choose"), ("enter", "adopt"), ("esc", "quit")];
-    let [stage, choice, _, typed, ..] = card(frame, heading, LAVENDER, &ADOPT, help(keys, None));
+    let inside = card(frame, heading, LAVENDER, &ADOPT, help(keys, None));
+    let [stage, choice, _, typed, ..] = stage_rows(inside);
 
     let art = species.animation(Clip::Idle).frame_at(app.clock);
     draw_pet(frame, species, art, stage);
@@ -84,14 +91,10 @@ fn draw_home(frame: &mut Frame, app: &App) {
     let keys = ACTIONS
         .iter()
         .map(|action| (action.key, action.label))
-        .chain([('s', "sleep"), ('q', "quit")]);
-    let [stage, status, _, food, joy, energy, _] = card(
-        frame,
-        heading,
-        border,
-        &decoration(pet.mood()),
-        help(keys, app.ongoing()),
-    );
+        .chain([('s', "sleep"), ('k', "skills"), ('q', "quit")]);
+    let help = help(keys, app.ongoing());
+    let inside = card(frame, heading, border, &decoration(pet.mood()), help);
+    let [stage, status, _, food, joy, energy, _] = stage_rows(inside);
 
     draw_pet(frame, species, app.frame(pet), stage);
 
@@ -126,7 +129,7 @@ fn card(
     border: Color,
     decoration: &Decoration,
     help: Line,
-) -> [Rect; 7] {
+) -> Rect {
     let color = decoration.color;
     let [left, right] = decoration.title;
     let mut title = vec![Span::styled(format!(" {left} "), color)];
@@ -143,7 +146,10 @@ fn card(
     frame.render_widget(Clear, area);
     frame.render_widget(card, area);
     draw_ornaments(frame, decoration, inside);
+    inside.inner(Margin::new(CARD_PADDING, 0))
+}
 
+fn stage_rows(inside: Rect) -> [Rect; 7] {
     Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(1),
@@ -153,8 +159,68 @@ fn card(
         Constraint::Length(1),
         Constraint::Length(1),
     ])
-    .horizontal_margin(CARD_PADDING)
     .areas(inside)
+}
+
+fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
+    let Some(pet) = &app.pet else {
+        return;
+    };
+    let heading = vec![Span::styled(
+        format!("{}'s skills", pet.name),
+        app.chosen().color,
+    )];
+    let keys = [("up/down", "move"), ("enter", "focus"), ("esc", "back")];
+    let inside = card(
+        frame,
+        heading,
+        LAVENDER,
+        &decoration(pet.mood()),
+        help(keys, None),
+    );
+    let rows = Layout::vertical([Constraint::Length(1); SKILL_ROWS])
+        .areas::<SKILL_ROWS>(inside.inner(Margin::new(0, SKILL_LIST_TOP)));
+
+    for (index, skill) in Skill::ALL.into_iter().enumerate() {
+        draw_skill_row(frame, app, pet, skill, index == choice, rows[index]);
+    }
+    let all = rows[Skill::ALL.len()];
+    let focused = pet.focus == Focus::All;
+    let name = Span::styled("All skills (slow)", if focused { PINK } else { TEXT });
+    frame.render_widget(
+        Line::from(vec![cursor(choice == Skill::ALL.len()), name]),
+        all,
+    );
+
+    let total = Line::styled(format!("Total level {}", pet.level()), MUTED);
+    frame.render_widget(total.centered(), rows[SKILL_ROWS - 1]);
+}
+
+fn draw_skill_row(frame: &mut Frame, app: &App, pet: &Pet, skill: Skill, chosen: bool, row: Rect) {
+    let level = pet.skill(skill);
+    let focused = pet.focus == Focus::One(skill);
+    let numbers = Line::styled(format!(" {}/{}", level.into, level.needed), MUTED);
+    let [name, number, track, xp] = Layout::horizontal([
+        Constraint::Length(SKILL_NAME_WIDTH),
+        Constraint::Length(SKILL_LEVEL_WIDTH),
+        Constraint::Fill(1),
+        Constraint::Length(SKILL_XP_WIDTH),
+    ])
+    .areas(row);
+    let color = if focused { PINK } else { TEXT };
+    let label = Line::from(vec![cursor(chosen), Span::styled(skill.name(), color)]);
+    frame.render_widget(label, name);
+    frame.render_widget(Line::styled(level.number.to_string(), TEXT), number);
+    frame.render_widget(bar::xp_bar(level.ratio(), track.width, app.clock), track);
+    frame.render_widget(numbers.right_aligned(), xp);
+}
+
+fn cursor(chosen: bool) -> Span<'static> {
+    if chosen {
+        Span::styled("> ", YELLOW)
+    } else {
+        Span::raw("  ")
+    }
 }
 
 #[cfg(debug_assertions)]

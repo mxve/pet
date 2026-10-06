@@ -18,9 +18,5 @@ pub fn mix(from: Color, to: Color, amount: f32) -> Color {
         let (from, to) = (f32::from(from), f32::from(to));
         (from + (to - from) * amount).round() as u8
     };
-    Color::Rgb(
-        channel(red, to_red),
-        channel(green, to_green),
-        channel(blue, to_blue),
-    )
+    Color::Rgb(channel(red, to_red), channel(green, to_green), channel(blue, to_blue))
 }

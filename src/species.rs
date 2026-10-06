@@ -30,13 +30,7 @@ impl Clip {
         match self {
             Clip::Train => Some(Clip::Play),
             Clip::Cheer => Some(Clip::Happy),
-            Clip::Idle
-            | Clip::Happy
-            | Clip::Sad
-            | Clip::Eat
-            | Clip::Pet
-            | Clip::Play
-            | Clip::Sleep => None,
+            Clip::Idle | Clip::Happy | Clip::Sad | Clip::Eat | Clip::Pet | Clip::Play | Clip::Sleep => None,
         }
     }
 }
@@ -75,11 +69,7 @@ impl Animation {
             Some("needs a frame_ms above 0")
         } else if self.frames.is_empty() {
             Some("has no frames")
-        } else if self
-            .sequence
-            .iter()
-            .any(|&index| index >= self.frames.len())
-        {
+        } else if self.sequence.iter().any(|&index| index >= self.frames.len()) {
             Some("has a sequence pointing past its last frame")
         } else {
             None
@@ -105,11 +95,7 @@ impl Species {
         if !species.clips.contains_key(&Clip::Idle) {
             return Err(format!("{name} has no idle clip").into());
         }
-        if let Some(code) = species
-            .colors
-            .keys()
-            .find(|code| !matches!(code, '1'..='9'))
-        {
+        if let Some(code) = species.colors.keys().find(|code| !matches!(code, '1'..='9')) {
             return Err(format!("{name} defines color {code:?}, only 1 to 9 are allowed").into());
         }
         for (clip, animation) in &species.clips {
@@ -128,10 +114,7 @@ impl Species {
     pub fn animation(&self, clip: Clip) -> &Animation {
         self.clips
             .get(&clip)
-            .or_else(|| {
-                clip.fallback()
-                    .and_then(|fallback| self.clips.get(&fallback))
-            })
+            .or_else(|| clip.fallback().and_then(|fallback| self.clips.get(&fallback)))
             .unwrap_or(&self.clips[&Clip::Idle])
     }
 
@@ -154,9 +137,10 @@ impl Species {
                 Some(ESCAPE) => spans.push(Span::styled(ESCAPE.to_string(), color)),
                 Some('0') => color = self.color,
                 Some(code) => {
-                    color = *self.colors.get(&code).ok_or_else(|| {
-                        format!("uses ^{code}, which has no color (write ^^ for a plain ^)")
-                    })?;
+                    color = *self
+                        .colors
+                        .get(&code)
+                        .ok_or_else(|| format!("uses ^{code}, which has no color (write ^^ for a plain ^)"))?;
                 }
                 None => return Err("has a line ending in a lone ^".into()),
             }
@@ -170,10 +154,7 @@ impl Species {
             .flat_map(|animation| &animation.frames)
             .map(|frame| self.paint(frame))
             .fold((0, 0), |(width, height), text| {
-                (
-                    width.max(text.width() as u16),
-                    height.max(text.height() as u16),
-                )
+                (width.max(text.width() as u16), height.max(text.height() as u16))
             })
     }
 }
@@ -220,18 +201,8 @@ mod tests {
             .collect();
         let body = Color::Rgb(1, 1, 1);
         let red = Color::Rgb(2, 2, 2);
-        let expected = [
-            ("a", body),
-            ("b", red),
-            ("c", body),
-            ("d", red),
-            ("e", body),
-            ("^", body),
-        ];
-        assert_eq!(
-            painted,
-            expected.map(|(text, color)| (text.to_string(), color))
-        );
+        let expected = [("a", body), ("b", red), ("c", body), ("d", red), ("e", body), ("^", body)];
+        assert_eq!(painted, expected.map(|(text, color)| (text.to_string(), color)));
     }
 
     #[test]

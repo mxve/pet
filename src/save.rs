@@ -23,9 +23,7 @@ pub fn load() -> Result<Option<Pet>> {
 }
 
 pub fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs())
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs())
 }
 
 pub fn store(pet: &mut Pet) -> Result<()> {

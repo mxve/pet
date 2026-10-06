@@ -86,13 +86,7 @@ pub enum Skill {
 }
 
 impl Skill {
-    pub const ALL: [Skill; 5] = [
-        Skill::Hitpoints,
-        Skill::Attack,
-        Skill::Defence,
-        Skill::Speed,
-        Skill::Stamina,
-    ];
+    pub const ALL: [Skill; 5] = [Skill::Hitpoints, Skill::Attack, Skill::Defence, Skill::Speed, Skill::Stamina];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -101,6 +95,16 @@ impl Skill {
             Skill::Defence => "Defence",
             Skill::Speed => "Speed",
             Skill::Stamina => "Stamina",
+        }
+    }
+
+    pub fn short_name(self) -> &'static str {
+        match self {
+            Skill::Hitpoints => "HIT",
+            Skill::Attack => "ATK",
+            Skill::Defence => "DEF",
+            Skill::Speed => "SPD",
+            Skill::Stamina => "STA",
         }
     }
 }
@@ -164,9 +168,7 @@ impl Pet {
             self.activity = Activity::Awake;
         }
         let gain = |now: f32, then: f32| (now - then).max(0.0);
-        gain(self.stats.food, before.food)
-            + gain(self.stats.joy, before.joy)
-            + gain(self.stats.energy, before.energy)
+        gain(self.stats.food, before.food) + gain(self.stats.joy, before.joy) + gain(self.stats.energy, before.energy)
     }
 
     pub fn tick(&mut self, elapsed: Duration) {
@@ -230,10 +232,7 @@ impl Pet {
     }
 
     pub fn total_level(&self) -> u32 {
-        Skill::ALL
-            .iter()
-            .map(|&skill| self.skill(skill).number)
-            .sum()
+        Skill::ALL.iter().map(|&skill| self.skill(skill).number).sum()
     }
 
     pub fn advance(&mut self, elapsed: Duration) {
@@ -346,10 +345,7 @@ mod tests {
     #[test]
     fn levels_cost_more_and_more_up_to_99() {
         let number = |xp| level_at(xp, 1).number;
-        assert_eq!(
-            [number(19.0), number(20.0), number(92.0), number(93.0)],
-            [0, 1, 3, 4]
-        );
+        assert_eq!([number(19.0), number(20.0), number(92.0), number(93.0)], [0, 1, 3, 4]);
         assert_eq!(level_cost(7), 2 * level_cost(0));
         assert_eq!(number(1e9), MAX_LEVEL);
     }

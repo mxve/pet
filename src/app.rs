@@ -100,9 +100,7 @@ impl App {
             screen: if pet.is_some() {
                 Screen::Home
             } else {
-                Screen::Adopt {
-                    name: String::new(),
-                }
+                Screen::Adopt { name: String::new() }
             },
             pet,
             species,
@@ -285,9 +283,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                pet.focus = Skill::ALL
-                    .get(choice)
-                    .map_or(Focus::All, |&skill| Focus::One(skill));
+                pet.focus = Skill::ALL.get(choice).map_or(Focus::All, |&skill| Focus::One(skill));
             }
             _ => {}
         }
@@ -318,11 +314,7 @@ fn skill_levels(pet: &Pet) -> [u32; Skill::ALL.len()] {
 }
 
 fn toggled(current: Activity, wanted: Activity) -> Activity {
-    if current == wanted {
-        Activity::Awake
-    } else {
-        wanted
-    }
+    if current == wanted { Activity::Awake } else { wanted }
 }
 
 #[cfg(debug_assertions)]
@@ -450,12 +442,7 @@ mod tests {
                 app.on_key(KeyEvent::from(code));
             }
         };
-        press(&[
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::Char(' '),
-            KeyCode::Enter,
-        ]);
+        press(&[KeyCode::Left, KeyCode::Right, KeyCode::Char(' '), KeyCode::Enter]);
         press(&[KeyCode::Char('q'), KeyCode::Char('f'), KeyCode::Backspace]);
         press(&[KeyCode::Enter]);
         assert_eq!(app.pet, Some(Pet::new("q", &app.species[0].name)));

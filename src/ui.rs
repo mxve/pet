@@ -85,11 +85,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
         Span::styled(format!("{} the {}", pet.name, species.name), species.color),
         Span::styled(format!(" | Lv {}", pet.level().number), TEXT),
     ];
-    let border = if pet.activity == Activity::Asleep {
-        MUTED
-    } else {
-        LAVENDER
-    };
+    let border = if pet.activity == Activity::Asleep { MUTED } else { LAVENDER };
     let menu = help([('k', "skills"), ('q', "quit")], None);
     let inside = card(frame, heading, border, &decoration(pet.mood()), menu);
     let [stage, status, _, food, joy, energy, care] = stage_rows(inside);
@@ -117,40 +113,22 @@ fn draw_home(frame: &mut Frame, app: &App) {
     let label = format!(" Lv {}", level.number);
     draw_labeled_bar(frame, app.clock, level.ratio(), &label, total);
 
-    let shown = pet.tracked();
-    let skill = pet.skill(shown);
     if pet.activity == Activity::Training {
-        let label = format!(" {} {}/{}", shown.name(), skill.into, skill.needed);
+        let shown = pet.tracked();
+        let skill = pet.skill(shown);
+        let label = format!(" {} {}", shown.short_name(), skill.number);
         draw_labeled_bar(frame, app.clock, skill.ratio(), &label, focus);
-    } else {
-        let name = match pet.focus {
-            Focus::One(skill) => skill.name(),
-            Focus::All => "all skills",
-        };
-        frame.render_widget(Clear, focus);
-        let line = Line::styled(format!("training focus: {name}"), MUTED);
-        frame.render_widget(line.centered(), focus);
     }
 }
 
 fn draw_labeled_bar(frame: &mut Frame, clock: Duration, ratio: f32, label: &str, row: Rect) {
     let label = Line::styled(label.to_string(), MUTED);
-    let [track, number] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(label.width() as u16),
-    ])
-    .areas(row);
+    let [track, number] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(label.width() as u16)]).areas(row);
     frame.render_widget(bar::xp_bar(ratio, track.width, clock), track);
     frame.render_widget(label, number);
 }
 
-fn card(
-    frame: &mut Frame,
-    heading: Vec<Span>,
-    border: Color,
-    decoration: &Decoration,
-    help: Line,
-) -> Rect {
+fn card(frame: &mut Frame, heading: Vec<Span>, border: Color, decoration: &Decoration, help: Line) -> Rect {
     let color = decoration.color;
     let [left, right] = decoration.title;
     let mut title = vec![Span::styled(format!(" {left} "), color)];
@@ -187,20 +165,10 @@ fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
     let Some(pet) = &app.pet else {
         return;
     };
-    let heading = vec![Span::styled(
-        format!("{}'s skills", pet.name),
-        app.chosen().color,
-    )];
+    let heading = vec![Span::styled(format!("{}'s skills", pet.name), app.chosen().color)];
     let keys = [("up/down", "move"), ("enter", "focus"), ("esc", "back")];
-    let inside = card(
-        frame,
-        heading,
-        LAVENDER,
-        &decoration(pet.mood()),
-        help(keys, None),
-    );
-    let rows = Layout::vertical([Constraint::Length(1); SKILL_ROWS])
-        .areas::<SKILL_ROWS>(inside.inner(Margin::new(0, SKILL_LIST_TOP)));
+    let inside = card(frame, heading, LAVENDER, &decoration(pet.mood()), help(keys, None));
+    let rows = Layout::vertical([Constraint::Length(1); SKILL_ROWS]).areas::<SKILL_ROWS>(inside.inner(Margin::new(0, SKILL_LIST_TOP)));
 
     for (index, skill) in Skill::ALL.into_iter().enumerate() {
         draw_skill_row(frame, app.clock, pet, skill, index == choice, rows[index]);
@@ -208,23 +176,13 @@ fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
     let all = rows[Skill::ALL.len()];
     let focused = pet.focus == Focus::All;
     let name = Span::styled("All skills (slow)", if focused { PINK } else { TEXT });
-    frame.render_widget(
-        Line::from(vec![cursor(choice == Skill::ALL.len()), name]),
-        all,
-    );
+    frame.render_widget(Line::from(vec![cursor(choice == Skill::ALL.len()), name]), all);
 
     let total = Line::styled(format!("Total level {}", pet.total_level()), MUTED);
     frame.render_widget(total.centered(), rows[SKILL_ROWS - 1]);
 }
 
-fn draw_skill_row(
-    frame: &mut Frame,
-    clock: Duration,
-    pet: &Pet,
-    skill: Skill,
-    chosen: bool,
-    row: Rect,
-) {
+fn draw_skill_row(frame: &mut Frame, clock: Duration, pet: &Pet, skill: Skill, chosen: bool, row: Rect) {
     let level = pet.skill(skill);
     let focused = pet.focus == Focus::One(skill);
     let numbers = Line::styled(format!(" {}/{}", level.into, level.needed), MUTED);
@@ -244,22 +202,17 @@ fn draw_skill_row(
 }
 
 fn cursor(chosen: bool) -> Span<'static> {
-    if chosen {
-        Span::styled("> ", YELLOW)
-    } else {
-        Span::raw("  ")
-    }
+    if chosen { Span::styled("> ", YELLOW) } else { Span::raw("  ") }
 }
 
 #[cfg(debug_assertions)]
 fn draw_dev_overlay(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let [stats, keys] =
-        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(Rect {
-            y: area.bottom().saturating_sub(2),
-            height: area.height.min(2),
-            ..area
-        });
+    let [stats, keys] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(Rect {
+        y: area.bottom().saturating_sub(2),
+        height: area.height.min(2),
+        ..area
+    });
     let clock = app.clock.as_secs_f32();
     let speed = app.speed();
     let line = match &app.pet {
@@ -307,21 +260,13 @@ fn card_area(frame: &Frame) -> Rect {
 
 fn card_rows(frame: &Frame) -> [Rect; 3] {
     let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT + 2);
-    Layout::vertical([
-        Constraint::Length(CARD_HEIGHT),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(area)
+    Layout::vertical([Constraint::Length(CARD_HEIGHT), Constraint::Length(1), Constraint::Length(1)]).areas(area)
 }
 
 fn draw_ornaments(frame: &mut Frame, decoration: &Decoration, inside: Rect) {
     let [big, small] = decoration.ornament;
     let area = inside.inner(Margin::new(1, 0));
-    let ornaments = Text::from(vec![
-        Line::from(format!("{big} {small}")),
-        Line::from(small),
-    ]);
+    let ornaments = Text::from(vec![Line::from(format!("{big} {small}")), Line::from(small)]);
     let mirrored = Text::from(vec![
         Line::from(format!("{small} {big}")).right_aligned(),
         Line::from(small).right_aligned(),
@@ -339,10 +284,7 @@ fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) {
     frame.render_widget(art, area);
 }
 
-fn help<K: ToString>(
-    keys: impl IntoIterator<Item = (K, &'static str)>,
-    lit: Option<char>,
-) -> Line<'static> {
+fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>, lit: Option<char>) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (index, (key, label)) in keys.into_iter().enumerate() {
         if index > 0 {
@@ -367,11 +309,7 @@ fn hint(key: String, label: &'static str, glowing: bool) -> [Span<'static>; 3] {
                 Span::styled(&label[end..], word),
             ]
         }
-        None => [
-            Span::styled(key, YELLOW),
-            Span::raw(" "),
-            Span::styled(label, word),
-        ],
+        None => [Span::styled(key, YELLOW), Span::raw(" "), Span::styled(label, word)],
     }
 }
 
@@ -435,11 +373,7 @@ fn stat_bar(label: &'static str, value: f32, color: Color) -> LineGauge<'static>
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let [row] = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .areas(area);
-    let [cell] = Layout::horizontal([Constraint::Length(width)])
-        .flex(Flex::Center)
-        .areas(row);
+    let [row] = Layout::vertical([Constraint::Length(height)]).flex(Flex::Center).areas(area);
+    let [cell] = Layout::horizontal([Constraint::Length(width)]).flex(Flex::Center).areas(row);
     cell
 }

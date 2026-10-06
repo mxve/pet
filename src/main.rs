@@ -28,9 +28,7 @@ fn main() -> Result<()> {
     let mut choice = 0;
     let mut away = Duration::ZERO;
     if let Some(pet) = &pet {
-        let known = species
-            .iter()
-            .position(|species| species.name == pet.species);
+        let known = species.iter().position(|species| species.name == pet.species);
         let Some(known) = known else {
             let path = save::path()?;
             return Err(format!("{}: unknown species \"{}\"", path.display(), pet.species).into());

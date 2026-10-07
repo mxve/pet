@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pet_core::pet::{self, Pet};
-use pet_core::protocol::{self, Challenge, Info, MAX_PACKET, PORT, Packet, PublicKey, Reply, Secret, Signup, StaticSecret};
+use pet_core::protocol::{
+    self, AccountId, Challenge, Info, MAX_PACKET, PORT, Packet, PublicKey, Reply, Request, Secret, Signup, StaticSecret,
+};
 use pet_core::world::World;
 use store::Store;
 
@@ -13,6 +15,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const DEFAULT_DB: &str = "pet.db";
 const DEFAULT_NAME: &str = "pet";
+const SAVE_CAUGHT_UP_AFTER: Duration = Duration::from_secs(60);
 
 struct Server {
     name: String,
@@ -52,11 +55,14 @@ fn load_key(path: &Path) -> Result<StaticSecret> {
 
 impl Server {
     fn answer(&self, request: &[u8], from: SocketAddr) -> Option<Vec<u8>> {
-        match protocol::decode(request)? {
+        let Some(packet) = protocol::decode(request) else {
+            return self.signed(request, from);
+        };
+        match packet {
             Packet::GetInfo { .. } => unsigned(self.info()?, request),
             Packet::GetChallenge { nonce, .. } => unsigned(self.challenge(nonce, from), request),
             Packet::Register(signup) => self.register(signup, from),
-            Packet::Info(_) | Packet::Challenge { .. } | Packet::Reply { .. } => None,
+            Packet::Info(_) | Packet::Challenge { .. } | Packet::Request { .. } | Packet::Reply { .. } => None,
         }
     }
 
@@ -98,6 +104,42 @@ impl Server {
         };
         Some(protocol::seal(&reply, &secret))
     }
+
+    fn signed(&self, bytes: &[u8], from: SocketAddr) -> Option<Vec<u8>> {
+        let Packet::Request {
+            account,
+            challenge,
+            sequence,
+            request,
+        } = protocol::unverified(bytes)?
+        else {
+            return None;
+        };
+        if !self.challenge_fits(&challenge, from) {
+            return None;
+        }
+        let public = self.store.public_key(&account).ok()??;
+        let secret = protocol::account_secret(&self.key, &PublicKey::from(public));
+        protocol::open(bytes, &secret)?;
+        let reply = match request {
+            Request::Sync { since } => self.sync(&account, since)?,
+        };
+        Some(protocol::seal(&Packet::Reply { sequence, reply }, &secret))
+    }
+
+    fn sync(&self, account: &AccountId, since: Option<u64>) -> Option<Reply> {
+        let mut world: World = toml::from_str(&self.store.world(account).ok()?).ok()?;
+        let stored = world.last_seen();
+        let now = now();
+        world.catch_up(now);
+        if world.last_seen() - stored >= SAVE_CAUGHT_UP_AFTER {
+            let saved = toml::to_string(&world).ok()?;
+            let revision = i64::try_from(world.revision()).ok()?;
+            self.store.save_world(account, revision, now.as_secs() as i64, &saved).ok()?;
+        }
+        let world = (since != Some(world.revision())).then_some(world);
+        Some(Reply::Synced { server_time: now, world })
+    }
 }
 
 fn unsigned(packet: Packet, request: &[u8]) -> Option<Vec<u8>> {
@@ -117,4 +159,16 @@ fn flag(name: &str) -> Option<String> {
     let mut arguments = std::env::args().skip_while(|argument| argument != name);
     arguments.next()?;
     arguments.next()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_world_survives_storage() {
+        let world = World::new(Pet::new("Mochi", "Cat"), Duration::from_secs(1_759_000_000));
+        let stored = toml::to_string(&world).unwrap();
+        assert_eq!(toml::from_str::<World>(&stored).unwrap(), world);
+    }
 }

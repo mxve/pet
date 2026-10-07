@@ -135,6 +135,10 @@ impl World {
         self.revision
     }
 
+    pub fn last_seen(&self) -> Duration {
+        self.last_seen
+    }
+
     pub fn apply(&mut self, command: Command, now: Duration) -> Result<Outcome, Refusal> {
         let busy = now < self.busy_until;
         let outcome = match command {

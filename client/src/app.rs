@@ -7,6 +7,7 @@ use pet_core::world::{ACTIONS, Clip, Command, Event, World};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
+use crate::online::{Remote, Synced};
 use crate::species::Species;
 
 const NAME_WIDTH: usize = 12;
@@ -32,6 +33,7 @@ pub enum Screen {
 
 pub struct App {
     pub world: Option<World>,
+    pub remote: Option<Remote>,
     pub species: Vec<Species>,
     pub choice: usize,
     pub screen: Screen,
@@ -49,16 +51,17 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(world: Option<World>, species: Vec<Species>, choice: usize, now: Duration) -> App {
+    pub fn new(species: Vec<Species>, remote: Option<Remote>, now: Duration) -> App {
         App {
-            screen: if world.is_some() {
+            screen: if remote.is_some() {
                 Screen::Home
             } else {
                 Screen::Adopt { name: String::new() }
             },
-            world,
+            world: None,
+            remote,
             species,
-            choice,
+            choice: 0,
             clock: Duration::ZERO,
             time: now,
             seed: RandomState::new().hash_one(0),
@@ -135,6 +138,9 @@ impl App {
         let Some(world) = &mut self.world else {
             return;
         };
+        if self.remote.is_some() {
+            return;
+        }
         let Ok(outcome) = world.apply(command, self.time) else {
             return;
         };
@@ -149,6 +155,28 @@ impl App {
             self.notice_shown = Duration::ZERO;
         }
         self.announce(outcome.events);
+    }
+
+    fn receive(&mut self) {
+        let Some(remote) = &self.remote else {
+            return;
+        };
+        for Synced { server_time, world } in remote.received() {
+            self.time = server_time;
+            let Some(world) = world else {
+                continue;
+            };
+            if self.world.as_ref().is_some_and(|shown| world.revision() < shown.revision()) {
+                continue;
+            }
+            if let Some(known) = self.species.iter().position(|species| species.name == world.pet().species) {
+                self.choice = known;
+            }
+            self.world = Some(world);
+            if matches!(self.screen, Screen::Adopt { .. }) {
+                self.screen = Screen::Home;
+            }
+        }
     }
 
     fn announce(&mut self, events: Vec<Event>) {
@@ -207,13 +235,16 @@ impl App {
     }
 
     fn on_home_key(&mut self, code: KeyCode) {
+        if code == KeyCode::Char('q') {
+            self.quit = true;
+            return;
+        }
         let Some(pet) = self.pet() else {
             return;
         };
         let activity = pet.activity;
         let focus = pet.focus;
         match code {
-            KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('k') => {
                 let choice = match focus {
                     Focus::One(skill) => Skill::ALL.iter().position(|each| *each == skill),
@@ -256,6 +287,7 @@ impl App {
     pub fn tick(&mut self, elapsed: Duration) {
         self.clock += elapsed;
         self.time += elapsed.mul_f32(self.speed);
+        self.receive();
         self.catch_up();
         self.acting = self
             .acting
@@ -331,7 +363,7 @@ mod tests {
 
     #[test]
     fn adopting_needs_a_name_and_any_letter_types() {
-        let mut app = App::new(None, species::builtin(), 0, Duration::ZERO);
+        let mut app = App::new(species::builtin(), None, Duration::ZERO);
         let mut press = |codes: &[KeyCode]| {
             for &code in codes {
                 app.on_key(KeyEvent::from(code));

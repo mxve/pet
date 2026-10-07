@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
@@ -18,6 +18,17 @@ pub struct Account {
 fn path() -> Result<PathBuf> {
     let home = std::env::home_dir().ok_or("cannot find the home directory")?;
     Ok(home.join(".pet").join("account.toml"))
+}
+
+pub fn load() -> Result<Option<Account>> {
+    let path = path()?;
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{}: {error}", path.display()).into()),
+    };
+    let account = toml::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(Some(account))
 }
 
 pub fn store(account: &Account) -> Result<()> {

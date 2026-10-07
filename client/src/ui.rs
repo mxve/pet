@@ -77,8 +77,16 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     frame.render_widget(line.centered(), typed);
 }
 
+fn draw_waiting(frame: &mut Frame) {
+    let heading = vec![Span::styled("pet", LAVENDER)];
+    let inside = card(frame, heading, LAVENDER, &ADOPT, help([('q', "quit")], None));
+    let [_, status, ..] = stage_rows(inside);
+    frame.render_widget(Line::styled("waiting for the server...", MUTED).centered(), status);
+}
+
 fn draw_home(frame: &mut Frame, app: &App) {
     let Some(pet) = app.pet() else {
+        draw_waiting(frame);
         return;
     };
     let species = app.chosen();

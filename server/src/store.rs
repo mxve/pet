@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use pet_core::protocol::{AccountId, Key};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const MIGRATIONS: &[&str] = &["
@@ -66,6 +66,25 @@ impl Store {
             params![&account[..], created, world],
         )?;
         transaction.commit()
+    }
+
+    pub fn public_key(&self, account: &AccountId) -> rusqlite::Result<Option<Key>> {
+        self.connection
+            .query_row("SELECT public_key FROM accounts WHERE id = ?1", [&account[..]], |row| row.get(0))
+            .optional()
+    }
+
+    pub fn world(&self, account: &AccountId) -> rusqlite::Result<String> {
+        self.connection
+            .query_row("SELECT world FROM worlds WHERE account_id = ?1", [&account[..]], |row| row.get(0))
+    }
+
+    pub fn save_world(&self, account: &AccountId, revision: i64, last_seen: i64, world: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE worlds SET revision = ?2, last_seen = ?3, world = ?4 WHERE account_id = ?1",
+            params![&account[..], revision, last_seen, world],
+        )?;
+        Ok(())
     }
 }
 

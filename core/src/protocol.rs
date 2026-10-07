@@ -1,9 +1,12 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use x25519_dalek::{PublicKey, StaticSecret};
+
+use crate::world::World;
 
 pub const HEADER: [u8; 4] = [0xFF; 4];
 pub const VERSION: u8 = 1;
@@ -18,14 +21,31 @@ pub type Secret = [u8; 32];
 pub type Challenge = [u8; 16];
 pub type AccountId = [u8; 16];
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Packet {
-    GetInfo { padding: Vec<u8> },
+    GetInfo {
+        padding: Vec<u8>,
+    },
     Info(Info),
-    GetChallenge { nonce: u64, padding: Vec<u8> },
-    Challenge { nonce: u64, challenge: Challenge },
+    GetChallenge {
+        nonce: u64,
+        padding: Vec<u8>,
+    },
+    Challenge {
+        nonce: u64,
+        challenge: Challenge,
+    },
     Register(Signup),
-    Reply { sequence: u64, reply: Reply },
+    Request {
+        account: AccountId,
+        challenge: Challenge,
+        sequence: u64,
+        request: Request,
+    },
+    Reply {
+        sequence: u64,
+        reply: Reply,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,9 +62,15 @@ pub struct Signup {
     pub species: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum Request {
+    Sync { since: Option<u64> },
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Reply {
     Registered { account: AccountId },
+    Synced { server_time: Duration, world: Option<World> },
 }
 
 pub fn encode(packet: &Packet) -> Vec<u8> {
@@ -84,9 +110,17 @@ pub fn seal(packet: &Packet, secret: &Secret) -> Vec<u8> {
 }
 
 pub fn open(bytes: &[u8], secret: &Secret) -> Option<Packet> {
-    let (body, tag) = bytes.split_at_checked(bytes.len().checked_sub(TAG_SIZE)?)?;
+    let (body, tag) = split_tag(bytes)?;
     mac(secret).chain_update(body).verify_slice(tag).ok()?;
     decode(body)
+}
+
+pub fn unverified(bytes: &[u8]) -> Option<Packet> {
+    decode(split_tag(bytes)?.0)
+}
+
+fn split_tag(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    bytes.split_at_checked(bytes.len().checked_sub(TAG_SIZE)?)
 }
 
 pub fn account_secret(own: &StaticSecret, other: &PublicKey) -> Secret {

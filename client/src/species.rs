@@ -165,6 +165,13 @@ mod tests {
     }
 
     #[test]
+    fn the_server_knows_every_builtin_pet() {
+        let mut names: Vec<String> = builtin().into_iter().map(|species| species.name).collect();
+        names.sort();
+        assert_eq!(names, pet_core::pet::SPECIES);
+    }
+
+    #[test]
     fn frame_at_follows_the_sequence_and_wraps() {
         let animation = Animation {
             frame_ms: 100,

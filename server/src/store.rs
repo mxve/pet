@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::Connection;
+use pet_core::protocol::{AccountId, Key};
+use rusqlite::{Connection, params};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const MIGRATIONS: &[&str] = &["
@@ -52,6 +53,19 @@ impl Store {
 
     pub fn accounts(&self) -> rusqlite::Result<u32> {
         self.connection.query_row("SELECT count(*) FROM accounts", [], |row| row.get(0))
+    }
+
+    pub fn register(&self, account: &AccountId, public: &Key, created: i64, world: &str) -> rusqlite::Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "INSERT INTO accounts (id, public_key, created, last_session) VALUES (?1, ?2, ?3, ?3)",
+            params![&account[..], &public[..], created],
+        )?;
+        transaction.execute(
+            "INSERT INTO worlds (account_id, revision, last_seen, world) VALUES (?1, 0, ?2, ?3)",
+            params![&account[..], created, world],
+        )?;
+        transaction.commit()
     }
 }
 

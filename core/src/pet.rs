@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 pub const FULL: f32 = 100.0;
 pub const LOW: f32 = 25.0;
+pub const SPECIES: [&str; 5] = ["Bunny", "Cat", "Dog", "Fox", "Slime"];
+pub const NAME_LENGTH: usize = 12;
 const HIGH: f32 = 70.0;
 const CATCH_UP_STEP: Duration = Duration::from_secs(60);
 const LEVEL_BASE_XP: f64 = 20.0;
@@ -291,6 +293,15 @@ fn level_at(xp: f32, scale: u32) -> Level {
 fn level_cost(level: u32) -> u32 {
     let doublings = f64::from(level) / LEVELS_PER_DOUBLING;
     (LEVEL_BASE_XP * doublings.exp2()).round() as u32
+}
+
+pub fn valid_name(name: &str) -> bool {
+    let length = name.chars().count();
+    name == name.trim() && (1..=NAME_LENGTH).contains(&length) && !name.chars().any(hides_text)
+}
+
+fn hides_text(character: char) -> bool {
+    character.is_control() || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 #[cfg(test)]

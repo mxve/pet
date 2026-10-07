@@ -1,15 +1,15 @@
+mod account;
 mod app;
 mod bar;
+mod online;
 mod save;
 mod species;
 mod theme;
 mod ui;
 
-use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
 use app::App;
-use pet_core::protocol::{self, PORT, Packet};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
@@ -17,11 +17,10 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const TICK: Duration = Duration::from_millis(100);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
-const PING_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn main() -> Result<()> {
     if let Some(address) = flag("--ping") {
-        return ping(&address);
+        return online::ping(&address);
     }
     #[cfg(debug_assertions)]
     let dev = std::env::args().any(|argument| argument == "--dev");
@@ -51,35 +50,28 @@ fn main() -> Result<()> {
     result
 }
 
-fn ping(address: &str) -> Result<()> {
-    let address = if address.contains(':') {
-        address.to_string()
-    } else {
-        format!("{address}:{PORT}")
-    };
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.set_read_timeout(Some(PING_TIMEOUT))?;
-    socket.send_to(&protocol::get_info(), &address)?;
-    let mut buffer = [0; protocol::MAX_PACKET + 1];
-    let size = socket
-        .recv(&mut buffer)
-        .map_err(|error| format!("{address}: no answer ({error})"))?;
-    match protocol::decode(&buffer[..size]) {
-        Some(Packet::Info(info)) => println!(
-            "{address}: {}, {} players (protocol {})",
-            info.name,
-            info.players,
-            protocol::VERSION
-        ),
-        _ => return Err(format!("{address}: answered with something that is not info").into()),
-    }
-    Ok(())
-}
-
 fn flag(name: &str) -> Option<String> {
     let mut arguments = std::env::args().skip_while(|argument| argument != name);
     arguments.next()?;
     arguments.next()
+}
+
+fn sign_up(app: &mut App) {
+    if !app.take_adopted() {
+        return;
+    }
+    let Some(pet) = app.pet() else {
+        return;
+    };
+    let (name, species) = (pet.name.clone(), pet.species.clone());
+    let problem = match online::register(&name, &species) {
+        Ok(Some(account)) => account::store(&account).err(),
+        Ok(None) => None,
+        Err(error) => Some(error),
+    };
+    if let Some(problem) = problem {
+        app.say(&format!("could not sign up: {problem}"));
+    }
 }
 
 fn store(app: &mut App) -> Result<()> {
@@ -103,6 +95,7 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             && key.kind == KeyEventKind::Press
         {
             app.on_key(key);
+            sign_up(app);
             store(app)?;
             last_save = Instant::now();
         }

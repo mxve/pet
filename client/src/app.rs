@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::hash::{BuildHasher, RandomState};
 use std::time::Duration;
 
-use pet_core::pet::{Activity, Focus, Mood, Pet, Skill};
+use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use pet_core::world::{ACTIONS, Clip, Command, Event, World};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
@@ -41,6 +41,7 @@ pub struct App {
     pub quit: bool,
     #[cfg(debug_assertions)]
     pub dev: bool,
+    adopted: bool,
     acting: Option<(Clip, Duration)>,
     notices: VecDeque<Notice>,
     notice_shown: Duration,
@@ -64,6 +65,7 @@ impl App {
             quit: false,
             #[cfg(debug_assertions)]
             dev: false,
+            adopted: false,
             acting: None,
             notices: VecDeque::new(),
             notice_shown: Duration::ZERO,
@@ -107,6 +109,17 @@ impl App {
         };
         let blink = held.as_millis() / ONGOING_BLINK.as_millis();
         blink.is_multiple_of(2).then_some(key)
+    }
+
+    pub fn take_adopted(&mut self) -> bool {
+        std::mem::take(&mut self.adopted)
+    }
+
+    pub fn say(&mut self, text: &str) {
+        self.notices.push_back(Notice {
+            text: text.to_string(),
+            tone: Tone::Plain,
+        });
     }
 
     pub fn notice(&self) -> Option<&Notice> {
@@ -183,9 +196,10 @@ impl App {
                     name.pop();
                 }
             }
-            KeyCode::Enter if !name.trim().is_empty() => {
+            KeyCode::Enter if pet::valid_name(name.trim()) => {
                 let pet = Pet::new(name.trim(), &self.species[self.choice].name);
                 self.world = Some(World::new(pet, self.time));
+                self.adopted = true;
                 self.screen = Screen::Home;
             }
             _ => {}

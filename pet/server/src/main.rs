@@ -46,25 +46,28 @@ fn main() -> Result<()> {
         challenge_secret: protocol::random(),
         store: Store::open(&database).map_err(|error| format!("{}: {error}", database.display()))?,
     };
-    let socket = UdpSocket::bind(("0.0.0.0", port))?;
+    let socket = UdpSocket::bind(("0.0.0.0", port)).inspect_err(|problem| {
+        error!("server failed to start {{ port: {port}, error: {:?} }}", problem.to_string());
+    })?;
     let public = protocol::to_hex(PublicKey::from(&server.key).as_bytes());
     let accounts = server.store.accounts().unwrap_or_default();
-    info!("listening on udp {port}, database {}, {accounts} accounts", database.display());
     let shown = format!("{level:?}").to_lowercase();
-    info!("public key {public}, logging {shown} and up to {}", log_file.display());
+    info!("server started {{ port: {port}, database: {database:?}, accounts: {accounts} }}");
+    info!("server key {{ public: {public} }}");
+    info!("logging {{ level: {shown}, file: {log_file:?} }}");
     let mut buffer = [0; MAX_PACKET + 1];
     loop {
         let (size, from) = match socket.recv_from(&mut buffer) {
             Ok(received) => received,
             Err(problem) => {
-                warning!("receiving failed: {problem}");
+                warning!("receive failed {{ error: {:?} }}", problem.to_string());
                 continue;
             }
         };
         if let Some(reply) = server.answer(&buffer[..size], from)
             && let Err(problem) = socket.send_to(&reply, from)
         {
-            warning!("{from}: sending failed: {problem}");
+            warning!("send failed {{ to: {from}, error: {:?} }}", problem.to_string());
         }
     }
 }
@@ -82,16 +85,16 @@ impl Server {
         };
         match packet {
             Packet::GetInfo { .. } => {
-                debug!("{from}: info");
+                debug!("info asked {{ from: {from} }}");
                 unsigned(self.info()?, request, from)
             }
             Packet::GetChallenge { nonce, .. } => {
-                debug!("{from}: challenge");
+                debug!("challenge asked {{ from: {from} }}");
                 unsigned(self.challenge(nonce, from), request, from)
             }
             Packet::Register(signup) => self.register(signup, from),
             Packet::Info(_) | Packet::Challenge { .. } | Packet::Request { .. } | Packet::Reply { .. } => {
-                debug!("{from}: dropped a packet only the server sends");
+                debug!("packet dropped {{ from: {from}, reason: \"only the server sends it\" }}");
                 None
             }
         }
@@ -118,20 +121,21 @@ impl Server {
     }
 
     fn register(&self, signup: Signup, from: SocketAddr) -> Option<Vec<u8>> {
-        let refusal = if !self.challenge_fits(&signup.challenge, from) {
-            Some("a challenge that does not fit")
-        } else if !pet::valid_name(&signup.name) {
-            Some("an invalid name")
+        if !self.challenge_fits(&signup.challenge, from) {
+            let (name, species) = (&signup.name, &signup.species);
+            debug!("signup dropped {{ from: {from}, reason: \"challenge does not fit\", name: {name:?}, species: {species:?} }}");
+            return None;
+        }
+        let refusal = if !pet::valid_name(&signup.name) {
+            Some("invalid name")
         } else if !pet::SPECIES.contains(&signup.species.as_str()) {
-            Some("an unknown species")
+            Some("unknown species")
         } else {
             None
         };
         if let Some(refusal) = refusal {
-            debug!(
-                "{from}: dropped a signup with {refusal} ({:?} the {:?})",
-                signup.name, signup.species
-            );
+            let (name, species) = (&signup.name, &signup.species);
+            info!("signup refused {{ from: {from}, reason: {refusal:?}, name: {name:?}, species: {species:?} }}");
             return None;
         }
         let account = protocol::random();
@@ -142,7 +146,8 @@ impl Server {
             self.store.register(&account, &signup.public, now.as_secs() as i64, &world),
             "storing a signup",
         )?;
-        info!("{from}: {} signed up {} the {}", short(&account), signup.name, signup.species);
+        let (id, name, species) = (protocol::to_hex(&account), &signup.name, &signup.species);
+        info!("signed up {{ from: {from}, account: {id}, name: {name:?}, species: {species:?} }}");
         let secret = protocol::account_secret(&self.key, &PublicKey::from(signup.public));
         let reply = Packet::Reply {
             sequence: 0,
@@ -159,29 +164,41 @@ impl Server {
             request,
         } = protocol::unverified(bytes)?
         else {
-            debug!("{from}: dropped {} bytes that are not a request", bytes.len());
+            debug!(
+                "packet dropped {{ from: {from}, reason: \"not a packet\", bytes: {} }}",
+                bytes.len()
+            );
             return None;
         };
         if !self.challenge_fits(&challenge, from) {
-            debug!("{from}: {} sent a challenge that does not fit", short(&account));
+            debug!(
+                "request dropped {{ from: {from}, account: {}, reason: \"challenge does not fit\" }}",
+                protocol::to_hex(&account)
+            );
             return None;
         }
         let Some(public) = logged(self.store.public_key(&account), "looking up an account")? else {
-            debug!("{from}: {} is not an account", short(&account));
+            debug!(
+                "login failed {{ from: {from}, account: {}, reason: \"no such account\" }}",
+                protocol::to_hex(&account)
+            );
             return None;
         };
         let secret = protocol::account_secret(&self.key, &PublicKey::from(public));
         if protocol::open(bytes, &secret).is_none() {
-            debug!("{from}: {} sent a request with a wrong tag", short(&account));
+            debug!(
+                "login failed {{ from: {from}, account: {}, reason: \"wrong signature\" }}",
+                protocol::to_hex(&account)
+            );
             return None;
         }
         let reply = match request {
-            Request::Sync { since } => self.sync(&account, since)?,
+            Request::Sync { since } => self.sync(&account, since, from)?,
         };
         Some(protocol::seal(&Packet::Reply { sequence, reply }, &secret))
     }
 
-    fn sync(&self, account: &AccountId, since: Option<u64>) -> Option<Reply> {
+    fn sync(&self, account: &AccountId, since: Option<u64>, from: SocketAddr) -> Option<Reply> {
         let stored = logged(self.store.world(account), "loading a world")?;
         let mut world: World = logged(toml::from_str(&stored), "reading a stored world")?;
         let last_seen = world.last_seen();
@@ -194,11 +211,11 @@ impl Server {
                 self.store.save_world(account, revision, now.as_secs() as i64, &saved),
                 "saving a world",
             )?;
-            debug!("{} caught up and saved", short(account));
+            debug!("world saved {{ account: {}, revision: {revision} }}", protocol::to_hex(account));
         }
         let world = (since != Some(world.revision())).then_some(world);
-        let sent = if world.is_some() { "sent the world" } else { "unchanged" };
-        debug!("{} synced, {sent}", short(account));
+        let (id, sent) = (protocol::to_hex(account), world.is_some());
+        debug!("synced {{ from: {from}, account: {id}, since: {since:?}, world_sent: {sent} }}");
         Some(Reply::Synced { server_time: now, world })
     }
 }
@@ -207,7 +224,7 @@ fn unsigned(packet: Packet, request: &[u8], from: SocketAddr) -> Option<Vec<u8>>
     let reply = protocol::encode(&packet);
     if reply.len() > request.len() {
         debug!(
-            "{from}: dropped a {} byte request that would get a {} byte answer",
+            "answer dropped {{ to: {from}, reason: \"larger than the request\", request_bytes: {}, answer_bytes: {} }}",
             request.len(),
             reply.len()
         );
@@ -217,11 +234,9 @@ fn unsigned(packet: Packet, request: &[u8], from: SocketAddr) -> Option<Vec<u8>>
 }
 
 fn logged<T>(result: std::result::Result<T, impl Display>, what: &str) -> Option<T> {
-    result.map_err(|problem| error!("{what}: {problem}")).ok()
-}
-
-fn short(account: &AccountId) -> String {
-    protocol::to_hex(&account[..4])
+    result
+        .map_err(|problem| error!("storage failed {{ during: {what:?}, error: {:?} }}", problem.to_string()))
+        .ok()
 }
 
 fn now() -> Duration {

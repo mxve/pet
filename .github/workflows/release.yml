@@ -10,6 +10,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pet
     env:
       PET_SERVER: ${{ vars.PET_SERVER }}
       PET_SERVER_KEY: ${{ secrets.PET_SERVER_KEY }}
@@ -21,6 +24,8 @@ jobs:
           targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pet
 
       - name: install the windows cross compiler
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 zip
@@ -35,8 +40,8 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           mkdir -p dist/linux dist/windows
-          cp target/x86_64-unknown-linux-gnu/release/pet target/x86_64-unknown-linux-gnu/release/pet-server README.md dist/linux/
-          cp target/x86_64-pc-windows-gnu/release/pet.exe target/x86_64-pc-windows-gnu/release/pet-server.exe README.md dist/windows/
+          cp target/x86_64-unknown-linux-gnu/release/pet target/x86_64-unknown-linux-gnu/release/pet-server ../README.md dist/linux/
+          cp target/x86_64-pc-windows-gnu/release/pet.exe target/x86_64-pc-windows-gnu/release/pet-server.exe ../README.md dist/windows/
           tar -czf "dist/pet-${tag}-linux-x86_64.tar.gz" -C dist/linux .
           (cd dist/windows && zip -q "../pet-${tag}-windows-x86_64.zip" ./*)
 
@@ -45,13 +50,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.tar.gz
-            dist/*.zip
+            pet/dist/*.tar.gz
+            pet/dist/*.zip
 
       - name: release on gitea
         if: github.server_url != 'https://github.com'
         uses: akkuman/gitea-release-action@v1
         with:
           files: |
-            dist/*.tar.gz
-            dist/*.zip
+            pet/dist/*.tar.gz
+            pet/dist/*.zip

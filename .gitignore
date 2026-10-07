@@ -1,3 +1,4 @@
-/target
-/pet.db*
-/dev-keys
+target/
+pet.db*
+dev-keys/
+*.log

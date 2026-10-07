@@ -1,0 +1,9 @@
+[env]
+PET_SERVER = "127.0.0.1"
+PET_SERVER_KEY_FILE = { value = "dev-keys/server.pub", relative = true }
+PET_KEY_FILE = { value = "dev-keys/server.key", relative = true }
+
+[alias]
+client = "run --manifest-path pet/Cargo.toml -p pet --"
+dev = "run --manifest-path pet/Cargo.toml -p pet -- --dev"
+server = "run --manifest-path pet/Cargo.toml -p pet-server --"

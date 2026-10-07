@@ -1,0 +1,4 @@
+[alias]
+client = "run -p pet --"
+dev = "run -p pet -- --dev"
+server = "run -p pet-server --"

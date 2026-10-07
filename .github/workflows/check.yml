@@ -8,6 +8,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pet
     steps:
       - uses: actions/checkout@v4
 
@@ -16,6 +19,8 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pet
 
       - name: cargo check
         run: cargo check --workspace --all-targets

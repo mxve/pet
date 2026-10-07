@@ -15,6 +15,7 @@ pub enum Packet {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Info {
     pub name: String,
+    pub players: u32,
 }
 
 pub fn encode(packet: &Packet) -> Vec<u8> {
@@ -45,7 +46,10 @@ mod tests {
 
     #[test]
     fn only_whole_framed_packets_decode() {
-        let info = Packet::Info(Info { name: "pet".into() });
+        let info = Packet::Info(Info {
+            name: "pet".into(),
+            players: 3,
+        });
         let bytes = encode(&info);
         assert_eq!(decode(&bytes), Some(info));
         assert_eq!(decode(&bytes[4..]), None);

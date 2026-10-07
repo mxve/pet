@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 pet-core = { path = "../core" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }

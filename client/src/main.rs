@@ -65,7 +65,12 @@ fn ping(address: &str) -> Result<()> {
         .recv(&mut buffer)
         .map_err(|error| format!("{address}: no answer ({error})"))?;
     match protocol::decode(&buffer[..size]) {
-        Some(Packet::Info(info)) => println!("{address}: {} (protocol {})", info.name, protocol::VERSION),
+        Some(Packet::Info(info)) => println!(
+            "{address}: {}, {} players (protocol {})",
+            info.name,
+            info.players,
+            protocol::VERSION
+        ),
         _ => return Err(format!("{address}: answered with something that is not info").into()),
     }
     Ok(())

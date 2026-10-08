@@ -1,12 +1,12 @@
 use std::net::UdpSocket;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use pet_core::protocol::{
     self, AccountId, Challenge, Key, MAX_PACKET, PORT, Packet, PublicKey, Reply, Request, Secret, Signup, StaticSecret,
 };
-use pet_core::world::World;
+use pet_core::world::Command;
 
 use crate::Result;
 use crate::account::Account;
@@ -18,18 +18,18 @@ const SYNC_EVERY: Duration = Duration::from_millis(250);
 const CHALLENGE_LIFE: Duration = Duration::from_secs(60);
 const RETRY_AFTER: Duration = Duration::from_secs(2);
 
-pub struct Synced {
-    pub server_time: Duration,
-    pub world: Option<World>,
-}
-
 pub struct Remote {
-    synced: Receiver<Synced>,
+    replies: Receiver<Reply>,
+    commands: Sender<Command>,
 }
 
 impl Remote {
-    pub fn received(&self) -> Vec<Synced> {
-        self.synced.try_iter().collect()
+    pub fn received(&self) -> Vec<Reply> {
+        self.replies.try_iter().collect()
+    }
+
+    pub fn send(&self, command: Command) {
+        self.commands.send(command).ok();
     }
 }
 
@@ -66,9 +66,10 @@ pub fn follow(account: &Account) -> Result<Option<Remote>> {
     let private = protocol::from_hex(&account.key).ok_or("account.toml: the key is not 64 hex characters")?;
     let secret = protocol::account_secret(&StaticSecret::from(private), &PublicKey::from(server_key()?));
     let address = account.server.clone();
-    let (sender, synced) = mpsc::channel();
-    thread::spawn(move || keep_in_sync(&address, id, &secret, &sender));
-    Ok(Some(Remote { synced }))
+    let (reply_sender, replies) = mpsc::channel();
+    let (commands, command_receiver) = mpsc::channel();
+    thread::spawn(move || keep_in_sync(&address, id, &secret, &command_receiver, &reply_sender));
+    Ok(Some(Remote { replies, commands }))
 }
 
 fn server_key() -> Result<Key> {
@@ -76,9 +77,10 @@ fn server_key() -> Result<Key> {
     Ok(protocol::from_hex(key).ok_or("PET_SERVER_KEY is not 64 hex characters")?)
 }
 
-fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, sender: &Sender<Synced>) {
+fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, commands: &Receiver<Command>, replies: &Sender<Reply>) {
     let mut since = None;
     let mut sequence = 0;
+    let mut command = None;
     loop {
         let Ok(server) = Server::connect(address) else {
             thread::sleep(RETRY_AFTER);
@@ -96,16 +98,26 @@ fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, sender: &Sen
                 account,
                 challenge,
                 sequence,
-                request: Request::Sync { since },
+                request: match command.take() {
+                    Some(command) => Request::Command { command },
+                    None => Request::Sync { since },
+                },
             };
-            let Ok(Reply::Synced { server_time, world }) = server.ask(sequence, &request, secret) else {
+            let Ok(reply) = server.ask(sequence, &request, secret) else {
+                since = None;
                 break;
             };
-            since = world.as_ref().map(World::revision).or(since);
-            if sender.send(Synced { server_time, world }).is_err() {
+            if let Reply::Synced { world: Some(world), .. } | Reply::Done { world, .. } | Reply::Refused { world, .. } = &reply {
+                since = Some(world.revision());
+            }
+            if replies.send(reply).is_err() {
                 return;
             }
-            thread::sleep(SYNC_EVERY.saturating_sub(asked.elapsed()));
+            match commands.recv_timeout(SYNC_EVERY.saturating_sub(asked.elapsed())) {
+                Ok(next) => command = Some(next),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
         }
     }
 }

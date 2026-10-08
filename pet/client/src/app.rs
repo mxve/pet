@@ -3,11 +3,12 @@ use std::hash::{BuildHasher, RandomState};
 use std::time::Duration;
 
 use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
-use pet_core::world::{ACTIONS, Clip, Command, Event, World};
+use pet_core::protocol::Reply;
+use pet_core::world::{ACTIONS, Clip, Command, Event, Refusal, World};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
-use crate::online::{Remote, Synced};
+use crate::online::Remote;
 use crate::species::Species;
 
 const NAME_WIDTH: usize = 12;
@@ -18,6 +19,7 @@ const NOTICE_TIME: Duration = Duration::from_secs(2);
 pub enum Tone {
     Plain,
     Good,
+    Bad,
 }
 
 pub struct Notice {
@@ -138,12 +140,12 @@ impl App {
         let Some(world) = &mut self.world else {
             return;
         };
-        if self.remote.is_some() {
-            return;
-        }
         let Ok(outcome) = world.apply(command, self.time) else {
             return;
         };
+        if let Some(remote) = &self.remote {
+            remote.send(command);
+        }
         if let Some(clip) = outcome.clip {
             self.acting = Some((clip, Duration::ZERO));
         }
@@ -161,14 +163,33 @@ impl App {
         let Some(remote) = &self.remote else {
             return;
         };
-        for Synced { server_time, world } in remote.received() {
+        for reply in remote.received() {
+            let (server_time, world) = match reply {
+                Reply::Synced { server_time, world } => (server_time, world),
+                Reply::Done { server_time, world } => (server_time, Some(world)),
+                Reply::Refused {
+                    server_time,
+                    world,
+                    reason,
+                } => {
+                    self.acting = None;
+                    let text = match reason {
+                        Refusal::Busy => "is still busy.",
+                        Refusal::UnknownAction => "does not know how to do that.",
+                    };
+                    self.notices.push_front(Notice {
+                        text: text.to_string(),
+                        tone: Tone::Bad,
+                    });
+                    self.notice_shown = Duration::ZERO;
+                    (server_time, Some(world))
+                }
+                Reply::Registered { .. } => continue,
+            };
             self.time = server_time;
             let Some(world) = world else {
                 continue;
             };
-            if self.world.as_ref().is_some_and(|shown| world.revision() < shown.revision()) {
-                continue;
-            }
             if let Some(known) = self.species.iter().position(|species| species.name == world.pet().species) {
                 self.choice = known;
             }

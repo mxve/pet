@@ -356,6 +356,7 @@ fn tone_color(tone: Tone) -> Color {
     match tone {
         Tone::Plain => TEXT,
         Tone::Good => MINT,
+        Tone::Bad => ROSE,
     }
 }
 

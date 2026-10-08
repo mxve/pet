@@ -71,7 +71,7 @@ pub const ACTIONS: &[Action] = &[
     },
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     Act(char),
     Activity(Activity),
@@ -81,14 +81,14 @@ pub enum Command {
 }
 
 #[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Cheat {
     Xp,
     NextLevel,
     Shift(Stats),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Refusal {
     Busy,
     UnknownAction,
@@ -113,7 +113,6 @@ pub struct World {
     pet: Pet,
     last_seen: Duration,
     revision: u64,
-    #[serde(skip)]
     busy_until: Duration,
 }
 

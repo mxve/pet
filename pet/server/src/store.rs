@@ -79,6 +79,24 @@ impl Store {
             .query_row("SELECT world FROM worlds WHERE account_id = ?1", [&account[..]], |row| row.get(0))
     }
 
+    pub fn last_sequence(&self, account: &AccountId) -> rusqlite::Result<i64> {
+        self.connection
+            .query_row("SELECT last_sequence FROM accounts WHERE id = ?1", [&account[..]], |row| row.get(0))
+    }
+
+    pub fn save_command(&self, account: &AccountId, sequence: i64, revision: i64, last_seen: i64, world: &str) -> rusqlite::Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "UPDATE accounts SET last_sequence = ?2 WHERE id = ?1",
+            params![&account[..], sequence],
+        )?;
+        transaction.execute(
+            "UPDATE worlds SET revision = ?2, last_seen = ?3, world = ?4 WHERE account_id = ?1",
+            params![&account[..], revision, last_seen, world],
+        )?;
+        transaction.commit()
+    }
+
     pub fn save_world(&self, account: &AccountId, revision: i64, last_seen: i64, world: &str) -> rusqlite::Result<()> {
         self.connection.execute(
             "UPDATE worlds SET revision = ?2, last_seen = ?3, world = ?4 WHERE account_id = ?1",

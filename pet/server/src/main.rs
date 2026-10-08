@@ -11,7 +11,7 @@ use pet_core::pet::{self, Pet};
 use pet_core::protocol::{
     self, AccountId, Challenge, Info, MAX_PACKET, PORT, Packet, PublicKey, Reply, Request, Secret, Signup, StaticSecret,
 };
-use pet_core::world::World;
+use pet_core::world::{Command, World};
 use store::Store;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -194,8 +194,48 @@ impl Server {
         }
         let reply = match request {
             Request::Sync { since } => self.sync(&account, since, from)?,
+            Request::Command { command } => self.command(&account, sequence, command, from)?,
         };
         Some(protocol::seal(&Packet::Reply { sequence, reply }, &secret))
+    }
+
+    fn command(&self, account: &AccountId, sequence: u64, command: Command, from: SocketAddr) -> Option<Reply> {
+        let id = protocol::to_hex(account);
+        let last = logged(self.store.last_sequence(account), "loading a sequence")?;
+        let Some(sequence) = i64::try_from(sequence).ok().filter(|sequence| *sequence > last) else {
+            debug!("command dropped {{ from: {from}, account: {id}, reason: \"old sequence\", sequence: {sequence}, last: {last} }}");
+            return None;
+        };
+        #[cfg(debug_assertions)]
+        if let Command::Cheat(_) = command {
+            debug!("command dropped {{ from: {from}, account: {id}, reason: \"cheats need a dev server\" }}");
+            return None;
+        }
+        let stored = logged(self.store.world(account), "loading a world")?;
+        let mut world: World = logged(toml::from_str(&stored), "reading a stored world")?;
+        let now = now();
+        world.catch_up(now);
+        let applied = world.apply(command, now);
+        let saved = logged(toml::to_string(&world), "writing a world")?;
+        let revision = i64::try_from(world.revision()).ok()?;
+        logged(
+            self.store.save_command(account, sequence, revision, now.as_secs() as i64, &saved),
+            "saving a command",
+        )?;
+        match applied {
+            Ok(_) => {
+                info!("command applied {{ from: {from}, account: {id}, command: {command:?}, revision: {revision} }}");
+                Some(Reply::Done { server_time: now, world })
+            }
+            Err(reason) => {
+                debug!("command refused {{ from: {from}, account: {id}, command: {command:?}, reason: {reason:?} }}");
+                Some(Reply::Refused {
+                    server_time: now,
+                    world,
+                    reason,
+                })
+            }
+        }
     }
 
     fn sync(&self, account: &AccountId, since: Option<u64>, from: SocketAddr) -> Option<Reply> {
@@ -256,6 +296,40 @@ fn flag(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_command_counts_once_and_never_again() {
+        let server = Server {
+            name: "test".to_string(),
+            key: StaticSecret::from([1; 32]),
+            challenge_secret: [2; 32],
+            store: Store::open(Path::new(":memory:")).unwrap(),
+        };
+        let player = StaticSecret::from([3; 32]);
+        let account = [4; 16];
+        let world = toml::to_string(&World::new(Pet::new("Mochi", "Cat"), now())).unwrap();
+        server
+            .store
+            .register(&account, PublicKey::from(&player).as_bytes(), 0, &world)
+            .unwrap();
+        let from: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let secret = protocol::account_secret(&player, &PublicKey::from(&server.key));
+        let feed = |sequence| {
+            let request = Packet::Request {
+                account,
+                challenge: protocol::challenge(&server.challenge_secret, from, minute()),
+                sequence,
+                request: Request::Command {
+                    command: Command::Act('f'),
+                },
+            };
+            server.answer(&protocol::seal(&request, &secret), from)
+        };
+        assert!(feed(5).is_some());
+        assert!(feed(5).is_none());
+        assert!(feed(4).is_none());
+        assert!(feed(6).is_some());
+    }
 
     #[test]
     fn a_world_survives_storage() {

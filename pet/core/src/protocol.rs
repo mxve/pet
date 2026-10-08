@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::world::World;
+use crate::world::{Command, Refusal, World};
 
 pub const HEADER: [u8; 4] = [0xFF; 4];
 pub const VERSION: u8 = 1;
@@ -65,12 +65,27 @@ pub struct Signup {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Request {
     Sync { since: Option<u64> },
+    Command { command: Command },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Reply {
-    Registered { account: AccountId },
-    Synced { server_time: Duration, world: Option<World> },
+    Registered {
+        account: AccountId,
+    },
+    Synced {
+        server_time: Duration,
+        world: Option<World>,
+    },
+    Done {
+        server_time: Duration,
+        world: World,
+    },
+    Refused {
+        server_time: Duration,
+        world: World,
+        reason: Refusal,
+    },
 }
 
 pub fn encode(packet: &Packet) -> Vec<u8> {

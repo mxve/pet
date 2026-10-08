@@ -4,12 +4,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::symbols::border;
-use ratatui::symbols::line::THICK_HORIZONTAL;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
+use ratatui::widgets::{Block, BorderType, Clear};
 
 use crate::app::{App, Screen, Tone};
-use crate::bar;
+use crate::bar::Bar;
 use crate::species::Species;
 use crate::theme::{self, BASE, BUTTON, LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, SURFACE, TEXT, YELLOW};
 use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
@@ -19,6 +18,7 @@ use pet_core::world::{ACTIONS, Clip};
 const CARD_WIDTH: u16 = 55;
 const CARD_HEIGHT: u16 = 16;
 const CARD_PADDING: u16 = 3;
+const STAT_LABEL_WIDTH: u16 = 9;
 const GLOW_STRENGTH: f32 = 0.25;
 const SKILL_LIST_TOP: u16 = 2;
 const SKILL_ROWS: usize = 8;
@@ -104,9 +104,9 @@ fn draw_home(frame: &mut Frame, app: &App) {
     let line = Line::styled(format!("{} {message}", pet.name), color).centered();
     frame.render_widget(line, status);
 
-    frame.render_widget(stat_bar("Food    ", pet.stats.food, PEACH), food);
-    frame.render_widget(stat_bar("Joy     ", pet.stats.joy, PINK), joy);
-    frame.render_widget(stat_bar("Energy  ", pet.stats.energy, SKY), energy);
+    draw_stat(frame, app.clock, "Food", pet.stats.food, PEACH, food);
+    draw_stat(frame, app.clock, "Joy", pet.stats.joy, PINK, joy);
+    draw_stat(frame, app.clock, "Energy", pet.stats.energy, SKY, energy);
 
     let [_, total, focus] = card_rows(frame).map(|row| row.inner(Margin::new(CARD_PADDING + 1, 0)));
     let level = pet.level();
@@ -124,7 +124,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
 fn draw_labeled_bar(frame: &mut Frame, clock: Duration, ratio: f32, label: &str, row: Rect) {
     let label = Line::styled(label.to_string(), MUTED);
     let [track, number] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(label.width() as u16)]).areas(row);
-    frame.render_widget(bar::xp_bar(ratio, track.width, clock), track);
+    frame.render_widget(Bar::new("xp", ratio).line(track.width, clock), track);
     frame.render_widget(label, number);
 }
 
@@ -219,7 +219,7 @@ fn draw_skill_row(frame: &mut Frame, clock: Duration, pet: &Pet, skill: Skill, c
     let label = Line::from(vec![cursor(chosen), Span::styled(skill.name(), color)]);
     frame.render_widget(label, name);
     frame.render_widget(Line::styled(level.number.to_string(), TEXT), number);
-    frame.render_widget(bar::xp_bar(level.ratio(), track.width, clock), track);
+    frame.render_widget(Bar::new(skill.name(), level.ratio()).small().line(track.width, clock), track);
     frame.render_widget(numbers.right_aligned(), xp);
 }
 
@@ -417,14 +417,14 @@ fn mood_status(mood: Mood) -> (&'static str, Color) {
     }
 }
 
-fn stat_bar(label: &'static str, value: f32, color: Color) -> LineGauge<'static> {
+fn draw_stat(frame: &mut Frame, clock: Duration, label: &'static str, value: f32, color: Color, row: Rect) {
     let color = if value < pet::LOW { ROSE } else { color };
-    LineGauge::default()
-        .label(Line::styled(label, TEXT))
-        .ratio(f64::from(value / pet::FULL))
-        .filled_symbol(THICK_HORIZONTAL)
-        .filled_style(color)
-        .unfilled_style(MUTED)
+    let [name, track] = Layout::horizontal([Constraint::Length(STAT_LABEL_WIDTH), Constraint::Fill(1)]).areas(row);
+    frame.render_widget(Line::styled(label, TEXT), name);
+    frame.render_widget(
+        Bar::new(label, value / pet::FULL).small().fading_to(color).line(track.width, clock),
+        track,
+    );
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {

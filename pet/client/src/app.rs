@@ -8,12 +8,15 @@ use pet_core::world::{ACTIONS, Clip, Command, Event, Refusal, World};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
+use crate::floaters::Floaters;
 use crate::online::Remote;
 use crate::species::Species;
+use crate::theme::YELLOW;
 
 const NAME_WIDTH: usize = 12;
 const ONGOING_BLINK: Duration = Duration::from_millis(200);
 const NOTICE_TIME: Duration = Duration::from_secs(2);
+const XP_FLOAT_GAP: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
@@ -50,6 +53,9 @@ pub struct App {
     notices: VecDeque<Notice>,
     notice_shown: Duration,
     speed: f32,
+    pub floaters: Floaters,
+    xp_counted: Option<f32>,
+    xp_quiet: Duration,
 }
 
 impl App {
@@ -75,6 +81,9 @@ impl App {
             notices: VecDeque::new(),
             notice_shown: Duration::ZERO,
             speed: 1.0,
+            floaters: Floaters::default(),
+            xp_counted: None,
+            xp_quiet: Duration::ZERO,
         }
     }
 
@@ -310,6 +319,8 @@ impl App {
         self.time += elapsed.mul_f32(self.speed);
         self.receive();
         self.catch_up();
+        self.float_xp(elapsed);
+        self.floaters.tick(elapsed);
         self.acting = self
             .acting
             .map(|(clip, played)| (clip, played + elapsed))
@@ -320,6 +331,24 @@ impl App {
                 self.notices.pop_front();
                 self.notice_shown = Duration::ZERO;
             }
+        }
+    }
+}
+
+impl App {
+    fn float_xp(&mut self, elapsed: Duration) {
+        let Some(total) = self.pet().map(Pet::total_xp) else {
+            return;
+        };
+        self.xp_quiet += elapsed;
+        let counted = *self.xp_counted.get_or_insert(total);
+        let gained = (total - counted).floor();
+        if total < counted {
+            self.xp_counted = Some(total);
+        } else if gained >= 1.0 && self.xp_quiet >= XP_FLOAT_GAP {
+            self.floaters.spawn(format!("+{gained} xp"), YELLOW);
+            self.xp_counted = Some(counted + gained);
+            self.xp_quiet = Duration::ZERO;
         }
     }
 }

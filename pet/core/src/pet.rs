@@ -229,9 +229,12 @@ impl Pet {
         level_at(self.xp(skill), 1)
     }
 
+    pub fn total_xp(&self) -> f32 {
+        Skill::ALL.iter().map(|&skill| self.xp(skill)).sum()
+    }
+
     pub fn level(&self) -> Level {
-        let total: f32 = Skill::ALL.iter().map(|&skill| self.xp(skill)).sum();
-        level_at(total, Skill::ALL.len() as u32)
+        level_at(self.total_xp(), Skill::ALL.len() as u32)
     }
 
     pub fn total_level(&self) -> u32 {

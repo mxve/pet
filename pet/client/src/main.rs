@@ -1,6 +1,7 @@
 mod account;
 mod app;
 mod bar;
+mod floaters;
 mod online;
 mod species;
 mod theme;

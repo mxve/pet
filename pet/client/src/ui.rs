@@ -60,7 +60,7 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     let [stage, choice, _, typed, ..] = stage_rows(inside);
 
     let art = species.animation(Clip::Idle).frame_at(app.clock);
-    draw_pet(frame, species, art, stage);
+    _ = draw_pet(frame, species, art, stage);
 
     let line = Line::from(vec![
         Span::styled("<  ", MUTED),
@@ -104,7 +104,8 @@ fn draw_home(frame: &mut Frame, app: &App) {
         .chain([('r', "train"), ('s', "sleep")]);
     frame.render_widget(help(keys, app.ongoing()).centered(), care);
 
-    draw_pet(frame, species, app.frame(pet), stage);
+    let drawn = draw_pet(frame, species, app.frame(pet), stage);
+    app.floaters.draw(frame, drawn);
 
     let (message, color) = match app.notice() {
         Some(notice) => (notice.text.as_str(), tone_color(notice.tone)),
@@ -284,13 +285,14 @@ fn draw_ornaments(frame: &mut Frame, decoration: &Decoration, inside: Rect) {
     frame.render_widget(mirrored.style(decoration.color), area);
 }
 
-fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) {
+fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) -> Rect {
     let (width, height) = species.size();
     let art = species.paint(art);
     let [area] = Layout::vertical([Constraint::Length(art.height() as u16)])
         .flex(Flex::End)
         .areas(centered(stage, width, height));
     frame.render_widget(art, area);
+    area
 }
 
 fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>, lit: Option<char>) -> Line<'static> {

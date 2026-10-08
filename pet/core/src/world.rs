@@ -246,6 +246,7 @@ mod tests {
     #[test]
     fn only_care_that_helps_earns_xp() {
         let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
+        world.pet.focus = Focus::One(Skill::Hitpoints);
         world.pet.stats.food = 0.0;
         world.apply(Command::Act('f'), Duration::ZERO).unwrap();
         assert_eq!(world.pet.xp(Skill::Hitpoints), 12.0);
@@ -257,6 +258,7 @@ mod tests {
     #[test]
     fn level_ups_come_out_as_events_in_order() {
         let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
+        world.pet.focus = Focus::One(Skill::Hitpoints);
         let events = world.changing(|pet| {
             pet.earn(300.0);
             pet.focus = Focus::One(Skill::Attack);

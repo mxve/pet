@@ -14,7 +14,6 @@ use crate::species::Species;
 use crate::theme::YELLOW;
 
 const NAME_WIDTH: usize = 12;
-const ONGOING_BLINK: Duration = Duration::from_millis(200);
 const NOTICE_TIME: Duration = Duration::from_secs(2);
 const XP_FLOAT_GAP: Duration = Duration::from_millis(800);
 
@@ -111,18 +110,13 @@ impl App {
     }
 
     pub fn ongoing(&self) -> Option<char> {
-        let action = self.acting.and_then(|(clip, played)| {
-            let action = ACTIONS.iter().find(|action| action.clip == clip)?;
-            Some((action.key, played))
-        });
-        let (key, held) = match (action, self.pet().map(|pet| pet.activity)) {
-            (Some(action), _) => action,
-            (None, Some(Activity::Asleep)) => ('s', self.clock),
-            (None, Some(Activity::Training)) => ('r', self.clock),
-            (None, Some(Activity::Awake) | None) => return None,
-        };
-        let blink = held.as_millis() / ONGOING_BLINK.as_millis();
-        blink.is_multiple_of(2).then_some(key)
+        let action = self.acting.and_then(|(clip, _)| ACTIONS.iter().find(|action| action.clip == clip));
+        match (action, self.pet().map(|pet| pet.activity)) {
+            (Some(action), _) => Some(action.key),
+            (None, Some(Activity::Asleep)) => Some('s'),
+            (None, Some(Activity::Training)) => Some('r'),
+            (None, Some(Activity::Awake) | None) => None,
+        }
     }
 
     pub fn take_adopted(&mut self) -> bool {

@@ -159,7 +159,7 @@ impl Pet {
             },
             activity: Activity::Awake,
             skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
-            focus: Focus::One(Skill::Hitpoints),
+            focus: Focus::All,
         }
     }
 
@@ -381,6 +381,7 @@ mod tests {
     #[test]
     fn training_earns_xp_until_food_or_energy_runs_out() {
         let mut pet = Pet::new("Mochi", "Cat");
+        pet.focus = Focus::One(Skill::Hitpoints);
         pet.activity = Activity::Training;
         pet.tick(Duration::from_secs(3600));
         assert_eq!(pet.xp(Skill::Hitpoints), 120.0);
@@ -407,6 +408,7 @@ mod tests {
     #[test]
     fn a_pet_level_costs_one_level_of_every_skill() {
         let mut pet = Pet::new("Mochi", "Cat");
+        pet.focus = Focus::One(Skill::Hitpoints);
         pet.earn(25.0);
         assert_eq!(pet.level().number, 0);
         assert_eq!(pet.level().ratio(), 0.5);

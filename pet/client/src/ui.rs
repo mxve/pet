@@ -2,22 +2,24 @@ use std::time::Duration;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Margin, Position, Rect};
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
+use ratatui::symbols::border;
 use ratatui::symbols::line::THICK_HORIZONTAL;
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, LineGauge};
 
 use crate::app::{App, Screen, Tone};
 use crate::bar;
 use crate::species::Species;
-use crate::theme::{LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, TEXT, YELLOW};
+use crate::theme::{self, BASE, BUTTON, LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, SURFACE, TEXT, YELLOW};
 use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use pet_core::random::roll;
 use pet_core::world::{ACTIONS, Clip};
 
-const CARD_WIDTH: u16 = 49;
-const CARD_HEIGHT: u16 = 14;
+const CARD_WIDTH: u16 = 55;
+const CARD_HEIGHT: u16 = 16;
 const CARD_PADDING: u16 = 3;
+const GLOW_STRENGTH: f32 = 0.25;
 const SKILL_LIST_TOP: u16 = 2;
 const SKILL_ROWS: usize = 8;
 const SKILL_NAME_WIDTH: u16 = 13;
@@ -27,19 +29,8 @@ const NOISE: [&str; 4] = [".", "+", "⋆", "✧"];
 const NOISE_DENSITY: u64 = 60;
 const NOISE_PERIOD: Duration = Duration::from_secs(4);
 
-struct Decoration {
-    title: [&'static str; 2],
-    ornament: [&'static str; 2],
-    color: Color,
-}
-
-const ADOPT: Decoration = Decoration {
-    title: ["✧", "✧"],
-    ornament: ["✧", "⋆"],
-    color: PINK,
-};
-
 pub fn draw(frame: &mut Frame, app: &App) {
+    frame.render_widget(Block::new().style(Style::new().bg(BASE)), frame.area());
     draw_noise(frame, app.seed, app.clock);
     match &app.screen {
         Screen::Adopt { name } => draw_adopt(frame, app, name),
@@ -56,7 +47,7 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
     let species = app.chosen();
     let heading = vec![Span::styled("adopt a pet", species.color)];
     let keys = [("<- ->", "choose"), ("enter", "adopt"), ("ctrl+c", "quit")];
-    let inside = card(frame, heading, LAVENDER, &ADOPT, help(keys, None));
+    let inside = card(frame, heading, &ADOPT, help(keys));
     let [stage, choice, _, typed, ..] = stage_rows(inside);
 
     let art = species.animation(Clip::Idle).frame_at(app.clock);
@@ -79,7 +70,7 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
 
 fn draw_waiting(frame: &mut Frame) {
     let heading = vec![Span::styled("pet", LAVENDER)];
-    let inside = card(frame, heading, LAVENDER, &ADOPT, help([('q', "quit")], None));
+    let inside = card(frame, heading, &ADOPT, help([('q', "quit")]));
     let [_, status, ..] = stage_rows(inside);
     frame.render_widget(Line::styled("waiting for the server...", MUTED).centered(), status);
 }
@@ -94,15 +85,14 @@ fn draw_home(frame: &mut Frame, app: &App) {
         Span::styled(format!("{} the {}", pet.name, species.name), species.color),
         Span::styled(format!(" | Lv {}", pet.level().number), TEXT),
     ];
-    let border = if pet.activity == Activity::Asleep { MUTED } else { LAVENDER };
-    let menu = help([('k', "skills"), ('q', "quit")], None);
-    let inside = card(frame, heading, border, &decoration(pet.mood()), menu);
-    let [stage, status, _, food, joy, energy, care] = stage_rows(inside);
+    let menu = help([('k', "skills"), ('q', "quit")]);
+    let inside = card(frame, heading, &ornament(pet.mood()), menu);
+    let [stage, status, _, food, joy, energy, _, care, _] = stage_rows(inside);
     let keys = ACTIONS
         .iter()
         .map(|action| (action.key, action.label))
         .chain([('r', "train"), ('s', "sleep")]);
-    frame.render_widget(help(keys, app.ongoing()).centered(), care);
+    frame.render_widget(care_legend(keys, app.ongoing()).centered(), care);
 
     let drawn = draw_pet(frame, species, app.frame(pet), stage);
     app.floaters.draw(frame, drawn);
@@ -138,29 +128,51 @@ fn draw_labeled_bar(frame: &mut Frame, clock: Duration, ratio: f32, label: &str,
     frame.render_widget(label, number);
 }
 
-fn card(frame: &mut Frame, heading: Vec<Span>, border: Color, decoration: &Decoration, help: Line) -> Rect {
-    let color = decoration.color;
-    let [left, right] = decoration.title;
-    let mut title = vec![Span::styled(format!(" {left} "), color)];
-    title.extend(heading);
-    title.push(Span::styled(format!(" {right} "), color));
-    let title = Line::from(title);
+struct Ornament {
+    main: [&'static str; 2],
+    small: &'static str,
+    color: Color,
+}
+
+const ADOPT: Ornament = Ornament {
+    main: ["⋆", "⋆"],
+    small: "·",
+    color: PINK,
+};
+
+fn ornament(mood: Mood) -> Ornament {
+    let (main, small, color) = match mood {
+        Mood::Happy => (["⋆", "⋆"], "·", PINK),
+        Mood::Content => (["◦", "◦"], "·", MINT),
+        Mood::Training => (["⁺", "⁺"], "·", PEACH),
+        Mood::Asleep => (["☾", "☽"], "⋆", LAVENDER),
+        Mood::Hungry | Mood::Bored | Mood::Tired => (["°", "°"], "·", ROSE),
+    };
+    Ornament { main, small, color }
+}
+
+fn card(frame: &mut Frame, heading: Vec<Span>, ornament: &Ornament, help: Line) -> Rect {
+    let title = Line::from(heading);
     let card = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(border)
+        .border_set(border::EMPTY)
         .title(title.centered())
         .title_bottom(help.centered());
     let area = card_area(frame);
     let inside = card.inner(area);
-    frame.render_widget(Clear, area);
+    let padded = Rect::new(area.x, area.y.saturating_sub(1), area.width, area.height + 2).intersection(frame.area());
+    draw_surface(frame, padded);
     frame.render_widget(card, area);
-    draw_ornaments(frame, decoration, inside);
+    draw_edges(frame, padded);
+    draw_corners(frame, padded, ornament);
     inside.inner(Margin::new(CARD_PADDING, 0))
 }
 
-fn stage_rows(inside: Rect) -> [Rect; 7] {
+fn stage_rows(inside: Rect) -> [Rect; 9] {
     Layout::vertical([
         Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
@@ -177,7 +189,7 @@ fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
     };
     let heading = vec![Span::styled(format!("{}'s skills", pet.name), app.chosen().color)];
     let keys = [("up/down", "move"), ("enter", "focus"), ("esc", "back")];
-    let inside = card(frame, heading, LAVENDER, &decoration(pet.mood()), help(keys, None));
+    let inside = card(frame, heading, &ornament(pet.mood()), help(keys));
     let rows = Layout::vertical([Constraint::Length(1); SKILL_ROWS]).areas::<SKILL_ROWS>(inside.inner(Margin::new(0, SKILL_LIST_TOP)));
 
     for (index, skill) in Skill::ALL.into_iter().enumerate() {
@@ -269,20 +281,69 @@ fn card_area(frame: &Frame) -> Rect {
 }
 
 fn card_rows(frame: &Frame) -> [Rect; 3] {
-    let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT + 2);
-    Layout::vertical([Constraint::Length(CARD_HEIGHT), Constraint::Length(1), Constraint::Length(1)]).areas(area)
+    let area = centered(frame.area(), CARD_WIDTH, CARD_HEIGHT + 4);
+    let [_, card, _, total, focus] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(CARD_HEIGHT),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    [card, total, focus]
 }
 
-fn draw_ornaments(frame: &mut Frame, decoration: &Decoration, inside: Rect) {
-    let [big, small] = decoration.ornament;
-    let area = inside.inner(Margin::new(1, 0));
-    let ornaments = Text::from(vec![Line::from(format!("{big} {small}")), Line::from(small)]);
-    let mirrored = Text::from(vec![
-        Line::from(format!("{small} {big}")).right_aligned(),
-        Line::from(small).right_aligned(),
-    ]);
-    frame.render_widget(ornaments.style(decoration.color), area);
-    frame.render_widget(mirrored.style(decoration.color), area);
+fn draw_surface(frame: &mut Frame, area: Rect) {
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::new().style(Style::new().bg(BASE)), area);
+    frame.render_widget(Block::new().style(Style::new().bg(SURFACE)), area.inner(Margin::new(0, 1)));
+}
+
+fn draw_edges(frame: &mut Frame, area: Rect) {
+    if area.width < 6 || area.height < 4 {
+        return;
+    }
+    let (left, right, top, bottom) = (area.left(), area.right() - 1, area.top(), area.bottom() - 1);
+    let corner = |x: u16| x <= left + 1 || x >= right - 1;
+    let style = Style::new().fg(SURFACE).bg(BASE);
+    let inverted = Style::new().fg(BASE).bg(SURFACE);
+    let buffer = frame.buffer_mut();
+    for x in left..=right {
+        buffer[(x, top)].set_symbol(if corner(x) { " " } else { "▄" }).set_style(style);
+        buffer[(x, bottom)].set_symbol(if corner(x) { " " } else { "▀" }).set_style(style);
+    }
+    for (x, y, symbol, style) in [
+        (left, top + 1, "▗", style),
+        (right, top + 1, "▖", style),
+        (left, bottom - 1, "▝", style),
+        (right, bottom - 1, "▘", style),
+        (left + 2, top, "▂", style),
+        (right - 2, top, "▂", style),
+        (left + 2, bottom, "▆", inverted),
+        (right - 2, bottom, "▆", inverted),
+    ] {
+        buffer[(x, y)].set_symbol(symbol).set_style(style);
+    }
+}
+
+fn draw_corners(frame: &mut Frame, area: Rect, ornament: &Ornament) {
+    if area.width < 6 || area.height < 4 {
+        return;
+    }
+    let (left, right, top) = (area.left(), area.right() - 1, area.top());
+    let [main_left, main_right] = ornament.main;
+    let small = ornament.small;
+    let buffer = frame.buffer_mut();
+    for (x, y, symbol) in [
+        (left + 2, top + 1, main_left),
+        (left + 4, top + 1, small),
+        (left + 1, top + 2, small),
+        (right - 2, top + 1, main_right),
+        (right - 4, top + 1, small),
+        (right - 1, top + 2, small),
+    ] {
+        buffer[(x, y)].set_symbol(symbol).set_fg(ornament.color);
+    }
 }
 
 fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) -> Rect {
@@ -295,62 +356,44 @@ fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) -> Rec
     area
 }
 
-fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>, lit: Option<char>) -> Line<'static> {
-    let mut spans = vec![Span::raw(" ")];
+fn help<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>) -> Line<'static> {
+    care_legend(keys, None)
+}
+
+fn care_legend<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>, lit: Option<char>) -> Line<'static> {
+    let mut spans = Vec::new();
     for (index, (key, label)) in keys.into_iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled(" | ", MUTED));
+            spans.push(Span::raw(" "));
         }
         let key = key.to_string();
         let glowing = lit.is_some_and(|lit| key == lit.to_string());
-        spans.extend(hint(key, label, glowing));
+        let (fill, word) = if glowing { (glow(), PINK) } else { (BUTTON, MUTED) };
+        let inside = Style::new().bg(fill);
+        spans.push(Span::styled("▗", fill));
+        spans.push(Span::styled(" ", inside));
+        spans.extend(hint(key, label, inside.fg(word), inside.fg(YELLOW)));
+        spans.push(Span::styled(" ", inside));
+        spans.push(Span::styled("▘", fill));
     }
-    spans.push(Span::raw(" "));
     Line::from(spans)
 }
 
-fn hint(key: String, label: &'static str, glowing: bool) -> [Span<'static>; 3] {
-    let word = if glowing { PINK } else { MUTED };
+fn glow() -> Color {
+    theme::mix(SURFACE, PINK, GLOW_STRENGTH)
+}
+
+fn hint(key: String, label: &'static str, word: Style, letter: Style) -> [Span<'static>; 3] {
     match label.find(&key) {
         Some(at) => {
             let end = at + key.len();
             [
                 Span::styled(&label[..at], word),
-                Span::styled(&label[at..end], YELLOW),
+                Span::styled(&label[at..end], letter),
                 Span::styled(&label[end..], word),
             ]
         }
-        None => [Span::styled(key, YELLOW), Span::raw(" "), Span::styled(label, word)],
-    }
-}
-
-fn decoration(mood: Mood) -> Decoration {
-    match mood {
-        Mood::Happy => Decoration {
-            title: ["♥", "♥"],
-            ornament: ["♥", "✧"],
-            color: PINK,
-        },
-        Mood::Content => Decoration {
-            title: ["✿", "✿"],
-            ornament: ["✿", "⋆"],
-            color: MINT,
-        },
-        Mood::Training => Decoration {
-            title: ["✧", "✧"],
-            ornament: ["+", "."],
-            color: PEACH,
-        },
-        Mood::Asleep => Decoration {
-            title: ["☾", "⋆"],
-            ornament: ["⋆", "."],
-            color: LAVENDER,
-        },
-        Mood::Hungry | Mood::Bored | Mood::Tired => Decoration {
-            title: ["♡", "♡"],
-            ornament: ["♡", "."],
-            color: ROSE,
-        },
+        None => [Span::styled(key, letter), Span::styled(" ", word), Span::styled(label, word)],
     }
 }
 

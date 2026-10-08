@@ -12,7 +12,7 @@ use pet_core::protocol::{
     self, AccountId, Challenge, Info, MAX_PACKET, PORT, Packet, PublicKey, Reply, Request, Secret, Signup, StaticSecret,
 };
 use pet_core::world::{Command, World};
-use store::Store;
+use store::{Answer, Store};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -192,20 +192,36 @@ impl Server {
             );
             return None;
         }
-        let reply = match request {
-            Request::Sync { since } => self.sync(&account, since, from)?,
-            Request::Command { command } => self.command(&account, sequence, command, from)?,
-        };
-        Some(protocol::seal(&Packet::Reply { sequence, reply }, &secret))
+        match request {
+            Request::Sync { since } => {
+                let reply = self.sync(&account, since, from)?;
+                Some(protocol::seal(&Packet::Reply { sequence, reply }, &secret))
+            }
+            Request::Command { command } => self.command(&account, sequence, command, from, bytes, &secret),
+        }
     }
 
-    fn command(&self, account: &AccountId, sequence: u64, command: Command, from: SocketAddr) -> Option<Reply> {
+    fn command(
+        &self,
+        account: &AccountId,
+        sequence: u64,
+        command: Command,
+        from: SocketAddr,
+        request: &[u8],
+        secret: &Secret,
+    ) -> Option<Vec<u8>> {
         let id = protocol::to_hex(account);
+        let order = i64::try_from(sequence).ok()?;
+        let tag = protocol::tag(request)?;
+        if let Some(reply) = logged(self.store.reply(account, order, tag), "loading a reply")? {
+            debug!("command repeated {{ from: {from}, account: {id}, sequence: {sequence} }}");
+            return Some(reply);
+        }
         let last = logged(self.store.last_sequence(account), "loading a sequence")?;
-        let Some(sequence) = i64::try_from(sequence).ok().filter(|sequence| *sequence > last) else {
+        if order <= last {
             debug!("command dropped {{ from: {from}, account: {id}, reason: \"old sequence\", sequence: {sequence}, last: {last} }}");
             return None;
-        };
+        }
         #[cfg(debug_assertions)]
         if let Command::Cheat(_) = command {
             debug!("command dropped {{ from: {from}, account: {id}, reason: \"cheats need a dev server\" }}");
@@ -218,24 +234,28 @@ impl Server {
         let applied = world.apply(command, now);
         let saved = logged(toml::to_string(&world), "writing a world")?;
         let revision = i64::try_from(world.revision()).ok()?;
-        logged(
-            self.store.save_command(account, sequence, revision, now.as_secs() as i64, &saved),
-            "saving a command",
-        )?;
-        match applied {
+        let reply = match applied {
             Ok(_) => {
                 info!("command applied {{ from: {from}, account: {id}, command: {command:?}, revision: {revision} }}");
-                Some(Reply::Done { server_time: now, world })
+                Reply::Done { server_time: now, world }
             }
             Err(reason) => {
                 debug!("command refused {{ from: {from}, account: {id}, command: {command:?}, reason: {reason:?} }}");
-                Some(Reply::Refused {
+                Reply::Refused {
                     server_time: now,
                     world,
                     reason,
-                })
+                }
             }
-        }
+        };
+        let sealed = protocol::seal(&Packet::Reply { sequence, reply }, secret);
+        let answer = Answer { tag, reply: &sealed };
+        logged(
+            self.store
+                .save_command(account, order, revision, now.as_secs() as i64, &saved, answer),
+            "saving a command",
+        )?;
+        Some(sealed)
     }
 
     fn sync(&self, account: &AccountId, since: Option<u64>, from: SocketAddr) -> Option<Reply> {
@@ -298,7 +318,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_command_counts_once_and_never_again() {
+    fn a_command_counts_once_and_a_retry_gets_the_same_answer() {
         let server = Server {
             name: "test".to_string(),
             key: StaticSecret::from([1; 32]),
@@ -325,8 +345,11 @@ mod tests {
             };
             server.answer(&protocol::seal(&request, &secret), from)
         };
-        assert!(feed(5).is_some());
-        assert!(feed(5).is_none());
+        let first = feed(5);
+        assert!(first.is_some());
+        assert_eq!(feed(5), first);
+        let stored: World = toml::from_str(&server.store.world(&account).unwrap()).unwrap();
+        assert_eq!(stored.revision(), 1);
         assert!(feed(4).is_none());
         assert!(feed(6).is_some());
     }

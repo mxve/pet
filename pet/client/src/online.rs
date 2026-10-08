@@ -17,6 +17,8 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 const SYNC_EVERY: Duration = Duration::from_millis(250);
 const CHALLENGE_LIFE: Duration = Duration::from_secs(60);
 const RETRY_AFTER: Duration = Duration::from_secs(2);
+const SECOND_COPY_AFTER: Duration = Duration::from_millis(30);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct Remote {
     replies: Receiver<Reply>,
@@ -94,6 +96,7 @@ fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, commands: &R
         while fetched.elapsed() < CHALLENGE_LIFE {
             let asked = Instant::now();
             sequence = (sequence + 1).max(crate::now().as_millis() as u64);
+            let commanding = command.is_some();
             let request = Packet::Request {
                 account,
                 challenge,
@@ -103,7 +106,13 @@ fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, commands: &R
                     None => Request::Sync { since },
                 },
             };
-            let Ok(reply) = server.ask(sequence, &request, secret) else {
+            let sealed = protocol::seal(&request, secret);
+            let answer = if commanding {
+                server.insist(sequence, &sealed, secret)
+            } else {
+                server.ask(sequence, &sealed, secret)
+            };
+            let Ok(reply) = answer else {
                 since = None;
                 break;
             };
@@ -168,9 +177,21 @@ impl Server {
         })
     }
 
-    fn ask(&self, sequence: u64, request: &Packet, secret: &Secret) -> Result<Reply> {
-        self.send(&protocol::seal(request, secret))?;
+    fn ask(&self, sequence: u64, request: &[u8], secret: &Secret) -> Result<Reply> {
+        self.send(request)?;
         self.reply(sequence, secret)
+    }
+
+    fn insist(&self, sequence: u64, request: &[u8], secret: &Secret) -> Result<Reply> {
+        let started = Instant::now();
+        self.send(request)?;
+        thread::sleep(SECOND_COPY_AFTER);
+        loop {
+            match self.ask(sequence, request, secret) {
+                Err(_) if started.elapsed() < COMMAND_TIMEOUT => {}
+                answer => return answer,
+            }
+        }
     }
 
     fn reply(&self, sequence: u64, secret: &Secret) -> Result<Reply> {

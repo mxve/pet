@@ -130,6 +130,10 @@ pub fn open(bytes: &[u8], secret: &Secret) -> Option<Packet> {
     decode(body)
 }
 
+pub fn tag(bytes: &[u8]) -> Option<&[u8]> {
+    split_tag(bytes).map(|(_, tag)| tag)
+}
+
 pub fn unverified(bytes: &[u8]) -> Option<Packet> {
     decode(split_tag(bytes)?.0)
 }

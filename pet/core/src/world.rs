@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pet::{Activity, Focus, Pet, Skill, Stats};
 
-const POINTS_PER_XP: f32 = 5.0;
+const POINTS_PER_XP: f32 = 2.5;
 const ACTION_TIME: Duration = Duration::from_secs(2);
 #[cfg(debug_assertions)]
 const CHEAT_XP: f32 = 10.0;
@@ -248,10 +248,10 @@ mod tests {
         let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
         world.pet.stats.food = 0.0;
         world.apply(Command::Act('f'), Duration::ZERO).unwrap();
-        assert_eq!(world.pet.xp(Skill::Hitpoints), 6.0);
+        assert_eq!(world.pet.xp(Skill::Hitpoints), 12.0);
         world.pet.stats.food = 100.0;
         world.apply(Command::Act('f'), 3 * SECOND).unwrap();
-        assert_eq!(world.pet.xp(Skill::Hitpoints), 6.0);
+        assert_eq!(world.pet.xp(Skill::Hitpoints), 12.0);
     }
 
     #[test]
@@ -262,7 +262,7 @@ mod tests {
             pet.focus = Focus::One(Skill::Attack);
             pet.earn(20.0);
         });
-        let expected = [Event::Level(2), Event::Skill(Skill::Hitpoints, 9), Event::Skill(Skill::Attack, 1)];
+        let expected = [Event::Level(5), Event::Skill(Skill::Hitpoints, 15), Event::Skill(Skill::Attack, 1)];
         assert_eq!(events, expected);
     }
 }

@@ -9,13 +9,14 @@ pub const SPECIES: [&str; 5] = ["Bunny", "Cat", "Dog", "Fox", "Slime"];
 pub const NAME_LENGTH: usize = 12;
 const HIGH: f32 = 70.0;
 const CATCH_UP_STEP: Duration = Duration::from_secs(60);
-const LEVEL_BASE_XP: f64 = 20.0;
-const LEVELS_PER_DOUBLING: f64 = 7.0;
+const LEVEL_BASE_XP: f64 = 10.0;
+const LEVEL_GROWTH: f64 = 1.08;
 const MAX_LEVEL: u32 = 99;
+const BOUNDARY_SLACK: f64 = 1e-9;
 const ALL_SKILLS_SHARE: f32 = 0.1;
-const HAPPY_XP_PER_HOUR: f32 = 2.0;
-const ASLEEP_XP_PER_HOUR: f32 = 1.0;
-const TRAINING_XP_PER_HOUR: f32 = 30.0;
+const HAPPY_XP_PER_HOUR: f32 = 8.0;
+const ASLEEP_XP_PER_HOUR: f32 = 4.0;
+const TRAINING_XP_PER_HOUR: f32 = 120.0;
 const STAMINA_SAVING_PER_LEVEL: f32 = 0.01;
 const MAX_STAMINA_SAVING: f32 = 0.5;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
@@ -269,13 +270,10 @@ impl Pet {
 }
 
 fn level_at(xp: f32, scale: u32) -> Level {
-    let cost = |number| level_cost(number) * scale;
-    let mut number = 0;
-    let mut into = xp as u32;
-    while number < MAX_LEVEL && into >= cost(number) {
-        into -= cost(number);
-        number += 1;
-    }
+    let scale = f64::from(scale);
+    let xp = f64::from(xp.max(0.0)) / scale;
+    let reached = (1.0 + xp * (LEVEL_GROWTH - 1.0) / LEVEL_BASE_XP).ln() / LEVEL_GROWTH.ln() + BOUNDARY_SLACK;
+    let number = (reached.floor() as u32).min(MAX_LEVEL);
     if number == MAX_LEVEL {
         return Level {
             number,
@@ -285,14 +283,17 @@ fn level_at(xp: f32, scale: u32) -> Level {
     }
     Level {
         number,
-        into,
-        needed: cost(number),
+        into: ((xp - total_xp(number)).max(0.0) * scale) as u32,
+        needed: (level_cost(number) * scale).ceil() as u32,
     }
 }
 
-fn level_cost(level: u32) -> u32 {
-    let doublings = f64::from(level) / LEVELS_PER_DOUBLING;
-    (LEVEL_BASE_XP * doublings.exp2()).round() as u32
+fn total_xp(level: u32) -> f64 {
+    LEVEL_BASE_XP * (LEVEL_GROWTH.powi(level as i32) - 1.0) / (LEVEL_GROWTH - 1.0)
+}
+
+fn level_cost(level: u32) -> f64 {
+    LEVEL_BASE_XP * LEVEL_GROWTH.powi(level as i32)
 }
 
 pub fn valid_name(name: &str) -> bool {
@@ -356,8 +357,8 @@ mod tests {
     #[test]
     fn levels_cost_more_and_more_up_to_99() {
         let number = |xp| level_at(xp, 1).number;
-        assert_eq!([number(19.0), number(20.0), number(92.0), number(93.0)], [0, 1, 3, 4]);
-        assert_eq!(level_cost(7), 2 * level_cost(0));
+        assert_eq!([number(9.9), number(10.0), number(58.0), number(59.0)], [0, 1, 4, 5]);
+        assert!((level_cost(1) / level_cost(0) - LEVEL_GROWTH).abs() < 1e-12);
         assert_eq!(number(1e9), MAX_LEVEL);
     }
 
@@ -379,19 +380,18 @@ mod tests {
         let mut pet = Pet::new("Mochi", "Cat");
         pet.activity = Activity::Training;
         pet.tick(Duration::from_secs(3600));
-        assert_eq!(pet.xp(Skill::Hitpoints), 30.0);
+        assert_eq!(pet.xp(Skill::Hitpoints), 120.0);
         assert_eq!((pet.stats.food, pet.stats.energy), (80.0, 60.0));
         pet.advance(Duration::from_secs(10 * 3600));
         assert_eq!(pet.activity, Activity::Awake);
         assert_eq!(pet.stats.energy, 0.0);
-        assert!(pet.xp(Skill::Hitpoints) < 80.0);
+        assert!(pet.xp(Skill::Hitpoints) < 320.0);
     }
 
     #[test]
     fn stamina_slows_energy_loss() {
         let mut pet = Pet::new("Mochi", "Cat");
-        let to_level_20: u32 = (0..20).map(level_cost).sum();
-        pet.skills.insert(Skill::Stamina, to_level_20 as f32);
+        pet.skills.insert(Skill::Stamina, total_xp(20).ceil() as f32);
         assert_eq!(pet.skill(Skill::Stamina).number, 20);
         pet.tick(Duration::from_secs(3600));
         assert!((pet.stats.energy - 96.0).abs() < 0.001);
@@ -404,11 +404,11 @@ mod tests {
     #[test]
     fn a_pet_level_costs_one_level_of_every_skill() {
         let mut pet = Pet::new("Mochi", "Cat");
-        pet.earn(50.0);
+        pet.earn(25.0);
         assert_eq!(pet.level().number, 0);
         assert_eq!(pet.level().ratio(), 0.5);
         assert_eq!(pet.total_level(), 2);
-        pet.earn(50.0);
+        pet.earn(25.0);
         assert_eq!(pet.level().number, 1);
     }
 

@@ -17,15 +17,22 @@ mod ui;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::crossterm::execute;
+use ratatui::layout::{Position, Rect};
 
-use crate::app::App;
+use crate::app::{App, Click};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// 10 fps
 const TICK: Duration = Duration::from_millis(100);
+/// a paste comes as a burst of keys
+const BURST_GAP: Duration = Duration::from_millis(5);
 
+/// a captured mouse stops right clicks from pasting
 fn main() -> Result<()> {
     if let Some(address) = flag("--ping") {
         return online::ping(&address);
@@ -47,7 +54,10 @@ fn main() -> Result<()> {
         app.start_dev();
     }
 
-    let result = run(&mut ratatui::init(), &mut app);
+    let mut terminal = ratatui::init();
+    _ = execute!(std::io::stdout(), EnableMouseCapture);
+    let result = run(&mut terminal, &mut app);
+    _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
@@ -90,12 +100,14 @@ fn sign_up(app: &mut App) {
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let mut last_tick = Instant::now();
     while !app.quit {
-        terminal.draw(|frame| ui::draw(frame, app))?;
-        if event::poll(TICK)?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            app.on_key(key);
+        let mut clickable = Vec::new();
+        terminal.draw(|frame| clickable = ui::draw(frame, app))?;
+        if event::poll(TICK)? {
+            match read_burst(app, &clickable)?.as_slice() {
+                [] => {}
+                [key] => app.on_key(*key),
+                keys => app.on_paste(&keys.iter().filter_map(|key| key.code.as_char()).collect::<String>()),
+            }
             sign_up(app);
         }
         let now = Instant::now();
@@ -103,4 +115,35 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         last_tick = now;
     }
     Ok(())
+}
+
+/// keys are gathered to tell typing from a paste, a click ends it since the screen may change
+fn read_burst(app: &mut App, clickable: &[(Rect, Click)]) -> Result<Vec<KeyEvent>> {
+    let mut keys = Vec::new();
+    loop {
+        let gap = match event::read()? {
+            Event::Key(key) => {
+                if key.kind == KeyEventKind::Press {
+                    keys.push(key);
+                }
+                BURST_GAP
+            }
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row,
+                ..
+            }) => {
+                let at = Position::new(column, row);
+                if let Some(&(_, click)) = clickable.iter().find(|(area, _)| area.contains(at)) {
+                    app.on_click(click);
+                }
+                return Ok(keys);
+            }
+            _ => Duration::ZERO,
+        };
+        if !event::poll(gap)? {
+            return Ok(keys);
+        }
+    }
 }

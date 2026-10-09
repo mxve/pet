@@ -43,6 +43,13 @@ pub enum Screen {
     Skills { choice: usize },
 }
 
+/// what a click on a drawn spot does
+#[derive(Clone, Copy)]
+pub enum Click {
+    Key(KeyEvent),
+    Skill(usize),
+}
+
 pub struct App {
     world: Option<World>,
     pub remote: Option<Remote>,
@@ -66,6 +73,18 @@ pub struct App {
     pub floaters: Floaters,
     xp_counted: Option<f32>,
     xp_quiet: Duration,
+    /// row and column in the home buttons, kept while hidden
+    pointer: (usize, usize),
+    pointing: bool,
+}
+
+/// one table for the legend, the arrows and the clicks
+pub fn home_buttons() -> [Vec<(char, &'static str)>; 2] {
+    let care = ACTIONS
+        .iter()
+        .map(|action| (action.key, action.label))
+        .chain([('r', "train"), ('s', "sleep")]);
+    [care.collect(), vec![('k', "skills"), ('q', "quit")]]
 }
 
 impl App {
@@ -94,6 +113,8 @@ impl App {
             floaters: Floaters::default(),
             xp_counted: None,
             xp_quiet: Duration::ZERO,
+            pointer: (0, 0),
+            pointing: false,
         }
     }
 
@@ -128,6 +149,10 @@ impl App {
             (None, Some(Activity::Training)) => Some('r'),
             (None, Some(Activity::Awake) | None) => None,
         }
+    }
+
+    pub fn pointed(&self) -> Option<(usize, usize)> {
+        self.pointing.then_some(self.pointer)
     }
 
     pub fn take_adopted(&mut self) -> bool {
@@ -248,7 +273,23 @@ impl App {
         }
     }
 
-    /// the name is measured in terminal columns, wide chars count double
+    /// a paste only ever types the name
+    pub fn on_paste(&mut self, text: &str) {
+        if let Screen::Adopt { name } = &mut self.screen {
+            text.chars().for_each(|character| typed(name, character));
+        }
+    }
+
+    pub fn on_click(&mut self, click: Click) {
+        match click {
+            Click::Key(key) => self.on_key(key),
+            Click::Skill(choice) => {
+                self.screen = Screen::Skills { choice };
+                self.on_skills_key(KeyCode::Enter, choice);
+            }
+        }
+    }
+
     fn on_adopt_key(&mut self, code: KeyCode) {
         let Screen::Adopt { name } = &mut self.screen else {
             return;
@@ -258,12 +299,7 @@ impl App {
             KeyCode::Left => self.choice = (self.choice + count - 1) % count,
             KeyCode::Right => self.choice = (self.choice + 1) % count,
             KeyCode::Backspace => _ = name.pop(),
-            KeyCode::Char(character) => {
-                name.push(character);
-                if Span::raw(name.as_str()).width() > pet::NAME_LENGTH {
-                    name.pop();
-                }
-            }
+            KeyCode::Char(character) => typed(name, character),
             KeyCode::Enter if pet::valid_name(name.trim()) => {
                 let pet = Pet::new(name.trim(), &self.species[self.choice].name);
                 self.world = Some(World::new(pet, self.time));
@@ -275,7 +311,29 @@ impl App {
     }
 
     fn on_home_key(&mut self, code: KeyCode) {
-        if code == KeyCode::Char('q') {
+        let rows = home_buttons();
+        let (row, column) = self.pointer;
+        let length = rows[row].len();
+        match code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down if !self.pointing => self.pointing = true,
+            KeyCode::Left => self.pointer = (row, (column + length - 1) % length),
+            KeyCode::Right => self.pointer = (row, (column + 1) % length),
+            KeyCode::Up | KeyCode::Down => {
+                let other = (row + 1) % rows.len();
+                self.pointer = (other, column * rows[other].len() / length);
+            }
+            KeyCode::Enter if self.pointing => self.press(rows[row][column].0),
+            KeyCode::Esc => self.pointing = false,
+            KeyCode::Char(key) => {
+                self.pointing = false;
+                self.press(key);
+            }
+            _ => {}
+        }
+    }
+
+    fn press(&mut self, key: char) {
+        if key == 'q' {
             self.quit = true;
             return;
         }
@@ -284,8 +342,8 @@ impl App {
         };
         let activity = pet.activity;
         let focus = pet.focus;
-        match code {
-            KeyCode::Char('k') => {
+        match key {
+            'k' => {
                 let choice = match focus {
                     Focus::One(skill) => Skill::ALL.iter().position(|each| *each == skill),
                     Focus::All => None,
@@ -294,9 +352,9 @@ impl App {
                     choice: choice.unwrap_or(Skill::ALL.len()),
                 };
             }
-            KeyCode::Char('s') => self.send(Command::Activity(toggled(activity, Activity::Asleep))),
-            KeyCode::Char('r') => self.send(Command::Activity(toggled(activity, Activity::Training))),
-            KeyCode::Char(key) if world::action(key).is_some() => self.send(Command::Act(key)),
+            's' => self.send(Command::Activity(toggled(activity, Activity::Asleep))),
+            'r' => self.send(Command::Activity(toggled(activity, Activity::Training))),
+            key if world::action(key).is_some() => self.send(Command::Act(key)),
             _ => {}
         }
     }
@@ -360,6 +418,14 @@ impl App {
             self.xp_counted = Some(counted + gained);
             self.xp_quiet = Duration::ZERO;
         }
+    }
+}
+
+/// the name is measured in terminal columns, wide chars count double
+fn typed(name: &mut String, character: char) {
+    name.push(character);
+    if Span::raw(name.as_str()).width() > pet::NAME_LENGTH {
+        name.pop();
     }
 }
 

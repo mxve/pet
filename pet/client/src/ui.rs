@@ -10,15 +10,16 @@ use std::time::Duration;
 
 use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use pet_core::random::roll;
-use pet_core::world::{ACTIONS, Clip};
+use pet_core::world::Clip;
 use ratatui::Frame;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Flex, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::symbols::border;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear};
 
-use crate::app::{App, Screen, Tone};
+use crate::app::{self, App, Click, Screen, Tone};
 use crate::bar::Bar;
 use crate::species::Species;
 use crate::theme::{self, BASE, BUTTON, LAVENDER, MINT, MUTED, PEACH, PINK, ROSE, SKY, SURFACE, TEXT, YELLOW};
@@ -28,6 +29,9 @@ const CARD_HEIGHT: u16 = 16;
 const CARD_PADDING: u16 = 3;
 const STAT_LABEL_WIDTH: u16 = 9;
 const GLOW_STRENGTH: f32 = 0.25;
+const POINT_LIFT: f32 = 0.15;
+const PILL_GAP: u16 = 1;
+const HINT_GAP: u16 = 3;
 const SKILL_LIST_TOP: u16 = 2;
 const SKILL_ROWS: usize = 8;
 const SKILL_NAME_WIDTH: u16 = 13;
@@ -37,25 +41,33 @@ const NOISE: [&str; 4] = [".", "+", "⋆", "✧"];
 const NOISE_DENSITY: u64 = 60;
 const NOISE_PERIOD: Duration = Duration::from_secs(4);
 
-pub fn draw(frame: &mut Frame, app: &App) {
+/// returns what can be clicked and where
+pub fn draw(frame: &mut Frame, app: &App) -> Vec<(Rect, Click)> {
     fill(frame, frame.area(), BASE);
     draw_noise(frame, app.seed, app.clock);
-    match &app.screen {
+    let clickable = match &app.screen {
         Screen::Adopt { name } => draw_adopt(frame, app, name),
         Screen::Home => draw_home(frame, app),
         Screen::Skills { choice } => draw_skills(frame, app, *choice),
-    }
+    };
     #[cfg(debug_assertions)]
     if app.dev {
         draw_dev_overlay(frame, app);
     }
+    clickable
 }
 
-fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
+fn draw_adopt(frame: &mut Frame, app: &App, name: &str) -> Vec<(Rect, Click)> {
     let species = app.chosen();
     let heading = vec![Span::styled("adopt a pet", species.color)];
-    let keys = [("<- ->", "choose"), ("enter", "adopt"), ("ctrl+c", "quit")];
-    let inside = card(frame, heading, &ornament(Mood::Happy), buttons(keys, None));
+    let quit = Click::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    let buttons = [
+        ("<- ->", "choose", key(KeyCode::Right)),
+        ("enter", "adopt", key(KeyCode::Enter)),
+        ("ctrl+c", "quit", quit),
+    ];
+    let [inside, footer] = card(frame, heading, &ornament(Mood::Happy));
+    let mut clickable = draw_buttons(frame, footer, buttons, None, None);
     let [stage, choice, _, typed, ..] = stage_rows(inside);
 
     let art = species.animation(Clip::Idle).frame_at(app.clock);
@@ -66,7 +78,10 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
         Span::styled(species.name.as_str(), species.color),
         Span::styled("  >", MUTED),
     ]);
-    frame.render_widget(line.centered(), choice);
+    let area = centered(choice, line.width() as u16, 1);
+    frame.render_widget(line, area);
+    let [left, _, right] = Layout::horizontal([Constraint::Length(3), Constraint::Fill(1), Constraint::Length(3)]).areas(area);
+    clickable.extend([(left, key(KeyCode::Left)), (right, key(KeyCode::Right))]);
 
     let line = if name.is_empty() {
         Line::styled("type a name", MUTED)
@@ -74,33 +89,35 @@ fn draw_adopt(frame: &mut Frame, app: &App, name: &str) {
         Line::from(vec![Span::styled(name, TEXT), Span::styled("_", YELLOW)])
     };
     frame.render_widget(line.centered(), typed);
+    clickable
 }
 
-fn draw_waiting(frame: &mut Frame) {
+fn draw_waiting(frame: &mut Frame) -> Vec<(Rect, Click)> {
     let heading = vec![Span::styled("pet", LAVENDER)];
-    let inside = card(frame, heading, &ornament(Mood::Happy), buttons([('q', "quit")], None));
+    let [inside, footer] = card(frame, heading, &ornament(Mood::Happy));
+    let clickable = draw_buttons(frame, footer, [('q', "quit", key(KeyCode::Char('q')))], None, None);
     let [_, status, ..] = stage_rows(inside);
     frame.render_widget(Line::styled("waiting for the server...", MUTED).centered(), status);
+    clickable
 }
 
-fn draw_home(frame: &mut Frame, app: &App) {
+fn draw_home(frame: &mut Frame, app: &App) -> Vec<(Rect, Click)> {
     let Some(pet) = app.pet() else {
-        draw_waiting(frame);
-        return;
+        return draw_waiting(frame);
     };
     let species = app.chosen();
     let heading = vec![
         Span::styled(format!("{} the {}", pet.name, species.name), species.color),
         Span::styled(format!(" | Lv {}", pet.level().number), TEXT),
     ];
-    let menu = buttons([('k', "skills"), ('q', "quit")], None);
-    let inside = card(frame, heading, &ornament(pet.mood()), menu);
+    let [inside, footer] = card(frame, heading, &ornament(pet.mood()));
     let [stage, status, _, food, joy, energy, _, care, _] = stage_rows(inside);
-    let keys = ACTIONS
-        .iter()
-        .map(|action| (action.key, action.label))
-        .chain([('r', "train"), ('s', "sleep")]);
-    frame.render_widget(buttons(keys, app.ongoing()).centered(), care);
+    let mut clickable = Vec::new();
+    for (index, (keys, row)) in app::home_buttons().into_iter().zip([care, footer]).enumerate() {
+        let pointed = app.pointed().and_then(|(row, column)| (row == index).then_some(column));
+        let buttons = keys.into_iter().map(|(letter, label)| (letter, label, key(KeyCode::Char(letter))));
+        clickable.extend(draw_buttons(frame, row, buttons, app.ongoing(), pointed));
+    }
 
     let drawn = draw_pet(frame, species, app.frame(pet), stage);
     app.floaters.draw(frame, drawn);
@@ -126,6 +143,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
         let label = format!(" {} {}", shown.short_name(), skill.number);
         draw_labeled_bar(frame, app.clock, skill.ratio(), label, focus);
     }
+    clickable
 }
 
 fn draw_labeled_bar(frame: &mut Frame, clock: Duration, ratio: f32, label: String, row: Rect) {
@@ -152,20 +170,18 @@ fn ornament(mood: Mood) -> Ornament {
     Ornament { main, small, color }
 }
 
-/// drawn a row taller each way for rounded edges
-fn card(frame: &mut Frame, heading: Vec<Span>, ornament: &Ornament, help: Line) -> Rect {
+/// drawn a row taller each way for rounded edges, returns the inside and the bottom border row
+fn card(frame: &mut Frame, heading: Vec<Span>, ornament: &Ornament) -> [Rect; 2] {
     let title = Line::from(heading);
-    let card = Block::bordered()
-        .border_set(border::EMPTY)
-        .title(title.centered())
-        .title_bottom(help.centered());
+    let card = Block::bordered().border_set(border::EMPTY).title(title.centered());
     let [area, ..] = card_rows(frame);
     let inside = card.inner(area);
+    let footer = Rect::new(inside.x, area.bottom().saturating_sub(1), inside.width, 1);
     let padded = Rect::new(area.x, area.y.saturating_sub(1), area.width, area.height + 2).intersection(frame.area());
     draw_surface(frame, padded);
     frame.render_widget(card, area);
     draw_edges(frame, padded, ornament);
-    inside.inner(Margin::new(CARD_PADDING, 0))
+    [inside.inner(Margin::new(CARD_PADDING, 0)), footer.intersection(frame.area())]
 }
 
 fn stage_rows(inside: Rect) -> [Rect; 9] {
@@ -174,13 +190,18 @@ fn stage_rows(inside: Rect) -> [Rect; 9] {
     Layout::vertical(rows).areas(inside)
 }
 
-fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
+fn draw_skills(frame: &mut Frame, app: &App, choice: usize) -> Vec<(Rect, Click)> {
     let Some(pet) = app.pet() else {
-        return;
+        return Vec::new();
     };
     let heading = vec![Span::styled(format!("{}'s skills", pet.name), app.chosen().color)];
-    let keys = [("up/down", "move"), ("enter", "focus"), ("esc", "back")];
-    let inside = card(frame, heading, &ornament(pet.mood()), buttons(keys, None));
+    let hints = [
+        ("up/down", "move", key(KeyCode::Down)),
+        ("enter", "focus", key(KeyCode::Enter)),
+        ("esc", "back", key(KeyCode::Esc)),
+    ];
+    let [inside, footer] = card(frame, heading, &ornament(pet.mood()));
+    let mut clickable = draw_hints(frame, footer, hints);
     let rows = Layout::vertical([Constraint::Length(1); SKILL_ROWS]).areas::<SKILL_ROWS>(inside.inner(Margin::new(0, SKILL_LIST_TOP)));
 
     for (index, skill) in Skill::ALL.into_iter().enumerate() {
@@ -188,9 +209,16 @@ fn draw_skills(frame: &mut Frame, app: &App, choice: usize) {
     }
     let all = choice_label("All skills (slow)", choice == Skill::ALL.len(), pet.focus == Focus::All);
     frame.render_widget(all, rows[Skill::ALL.len()]);
+    clickable.extend(
+        rows[..=Skill::ALL.len()]
+            .iter()
+            .enumerate()
+            .map(|(index, row)| (*row, Click::Skill(index))),
+    );
 
     let total = Line::styled(format!("Total level {}", pet.total_level()), MUTED);
     frame.render_widget(total.centered(), rows[SKILL_ROWS - 1]);
+    clickable
 }
 
 fn draw_skill_row(frame: &mut Frame, clock: Duration, pet: &Pet, skill: Skill, chosen: bool, row: Rect) {
@@ -336,26 +364,70 @@ fn draw_pet(frame: &mut Frame, species: &Species, art: &str, stage: Rect) -> Rec
     area
 }
 
-fn buttons<K: ToString>(keys: impl IntoIterator<Item = (K, &'static str)>, lit: Option<char>) -> Line<'static> {
-    let mut spans = Vec::new();
-    for (index, (key, label)) in keys.into_iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::raw(" "));
-        }
-        let key = key.to_string();
-        let glowing = lit.is_some_and(|lit| key == lit.to_string());
-        let (fill, word) = if glowing {
-            (theme::mix(SURFACE, PINK, GLOW_STRENGTH), PINK)
-        } else {
-            (BUTTON, MUTED)
-        };
-        let inside = Style::new().bg(fill);
-        spans.push(Span::styled("▗", fill));
-        spans.push(Span::styled(" ", inside));
-        spans.extend(hint(key, label, inside.fg(word), inside.fg(YELLOW)));
-        spans.push(Span::styled(" ", inside));
-        spans.push(Span::styled("▘", fill));
-    }
+fn key(code: KeyCode) -> Click {
+    Click::Key(KeyEvent::from(code))
+}
+
+/// plain text for keys that are no buttons
+fn draw_hints(frame: &mut Frame, row: Rect, hints: impl IntoIterator<Item = (&'static str, &'static str, Click)>) -> Vec<(Rect, Click)> {
+    let lines = hints.into_iter().map(|(key, label, click)| {
+        let line = Line::from(vec![Span::styled(key, YELLOW), Span::styled(format!(" {label}"), MUTED)]);
+        (line, click)
+    });
+    place(frame, row, lines.collect(), HINT_GAP)
+}
+
+fn draw_buttons<K: ToString>(
+    frame: &mut Frame,
+    row: Rect,
+    buttons: impl IntoIterator<Item = (K, &'static str, Click)>,
+    lit: Option<char>,
+    pointed: Option<usize>,
+) -> Vec<(Rect, Click)> {
+    let pills = buttons
+        .into_iter()
+        .enumerate()
+        .map(|(index, (key, label, click))| (pill(key.to_string(), label, lit, pointed == Some(index)), click));
+    place(frame, row, pills.collect(), PILL_GAP)
+}
+
+/// centered in the row side by side, returns where each landed
+fn place(frame: &mut Frame, row: Rect, items: Vec<(Line<'static>, Click)>, gap: u16) -> Vec<(Rect, Click)> {
+    let width = items
+        .iter()
+        .map(|(line, _)| line.width() as u16 + gap)
+        .sum::<u16>()
+        .saturating_sub(gap);
+    let mut x = centered(row, width, 1).x;
+    items
+        .into_iter()
+        .map(|(line, click)| {
+            let width = line.width() as u16;
+            let area = Rect::new(x, row.y, width, 1).intersection(row);
+            x += width + gap;
+            frame.render_widget(line, area);
+            (area, click)
+        })
+        .collect()
+}
+
+/// the focus lifts the fill so it still reads on a lit pill
+fn pill(key: String, label: &'static str, lit: Option<char>, pointed: bool) -> Line<'static> {
+    let glowing = lit.is_some_and(|lit| key == lit.to_string());
+    let (fill, word) = if glowing {
+        (theme::mix(SURFACE, PINK, GLOW_STRENGTH), PINK)
+    } else {
+        (BUTTON, MUTED)
+    };
+    let (fill, word) = if pointed {
+        (theme::mix(fill, TEXT, POINT_LIFT), TEXT)
+    } else {
+        (fill, word)
+    };
+    let inside = Style::new().bg(fill);
+    let mut spans = vec![Span::styled("▗", fill), Span::styled(" ", inside)];
+    spans.extend(hint(key, label, inside.fg(word), inside.fg(YELLOW)));
+    spans.extend([Span::styled(" ", inside), Span::styled("▘", fill)]);
     Line::from(spans)
 }
 

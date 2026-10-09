@@ -1,15 +1,23 @@
+/*!
+species:
+  parse pet files
+  clips and frames
+  color escapes
+*/
+
 use std::collections::HashMap;
 use std::time::Duration;
 
+use pet_core::world::Clip;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span, Text};
 use serde::Deserialize;
 
 use crate::Result;
-use pet_core::world::Clip;
 
 include!(concat!(env!("OUT_DIR"), "/pets.rs"));
 
+/// cod-style color code escape
 const ESCAPE: char = '^';
 
 fn fallback(clip: Clip) -> Option<Clip> {
@@ -31,22 +39,20 @@ pub struct Animation {
 
 impl Animation {
     pub fn frame_at(&self, elapsed: Duration) -> &str {
-        let step = (elapsed.as_millis() / u128::from(self.frame_ms)) as usize;
-        let index = if self.sequence.is_empty() {
-            step % self.frames.len()
-        } else {
-            self.sequence[step % self.sequence.len()]
-        };
-        &self.frames[index]
+        let step = (elapsed.as_millis() / u128::from(self.frame_ms)) as usize % self.steps();
+        &self.frames[self.sequence.get(step).copied().unwrap_or(step)]
     }
 
     pub fn duration(&self) -> Duration {
-        let steps = if self.sequence.is_empty() {
+        Duration::from_millis(self.frame_ms) * self.steps() as u32
+    }
+
+    fn steps(&self) -> usize {
+        if self.sequence.is_empty() {
             self.frames.len()
         } else {
             self.sequence.len()
-        };
-        Duration::from_millis(self.frame_ms) * steps as u32
+        }
     }
 
     fn problem(&self) -> Option<&'static str> {
@@ -74,7 +80,7 @@ pub struct Species {
 }
 
 impl Species {
-    pub fn parse(source: &str) -> Result<Species> {
+    fn parse(source: &str) -> Result<Species> {
         let species: Species = toml::from_str(source)?;
         let name = &species.name;
         if !species.clips.contains_key(&Clip::Idle) {
@@ -133,6 +139,7 @@ impl Species {
         Ok(Line::from(spans))
     }
 
+    /// the biggest frame, so the pet doesnt jump between frames
     pub fn size(&self) -> (u16, u16) {
         self.clips
             .values()

@@ -1,3 +1,10 @@
+/*!
+pet client:
+  flags and startup
+  sign up
+  main loop
+*/
+
 mod account;
 mod app;
 mod bar;
@@ -9,18 +16,21 @@ mod ui;
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use app::App;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
+use crate::app::App;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+/// 10 fps
 const TICK: Duration = Duration::from_millis(100);
 
 fn main() -> Result<()> {
     if let Some(address) = flag("--ping") {
         return online::ping(&address);
     }
+
     #[cfg(debug_assertions)]
     let dev = std::env::args().any(|argument| argument == "--dev");
     #[cfg(not(debug_assertions))]
@@ -30,11 +40,13 @@ fn main() -> Result<()> {
         Some(account) => online::follow(account)?,
         None => None,
     };
+
     let mut app = App::new(species::builtin(), remote, now());
     #[cfg(debug_assertions)]
     if dev {
         app.start_dev();
     }
+
     let result = run(&mut ratatui::init(), &mut app);
     ratatui::restore();
     result
@@ -61,8 +73,8 @@ fn sign_up(app: &mut App) {
     let Some(pet) = app.pet() else {
         return;
     };
-    let (name, species) = (pet.name.clone(), pet.species.clone());
-    let followed = online::register(&name, &species).and_then(|account| match account {
+
+    let followed = online::register(&pet.name, &pet.species).and_then(|account| match account {
         Some(account) => {
             account::store(&account)?;
             online::follow(&account)

@@ -1,7 +1,13 @@
+/*!
+build script:
+  bake pets and server key into the client
+*/
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// bake pets so we can ship a single artifact
 fn main() {
     println!("cargo::rerun-if-changed=pets");
     embed_server_key();
@@ -17,6 +23,7 @@ fn main() {
     fs::write(out.join("pets.rs"), format!("const BUILTIN: &[&str] = &[\n{sources}];\n")).expect("the out dir is writable");
 }
 
+/// the key file comes from the cargo config, so nobody passes keys by hand
 fn embed_server_key() {
     println!("cargo::rerun-if-env-changed=PET_SERVER_KEY");
     println!("cargo::rerun-if-env-changed=PET_SERVER_KEY_FILE");

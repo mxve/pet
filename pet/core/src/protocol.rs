@@ -1,3 +1,11 @@
+/*!
+protocol:
+  framing
+  signing and keys
+  challenges
+  hex
+*/
+
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -8,12 +16,18 @@ pub use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::world::{Command, Refusal, World};
 
-pub const HEADER: [u8; 4] = [0xFF; 4];
+/// quake oob header
+const HEADER: [u8; 4] = [0xFF; 4];
+/// protocol version, outdated clients get dropped
 pub const VERSION: u8 = 1;
+/// we're doing quake already so lets reuse the port aswell
 pub const PORT: u16 = 27960;
+/// prevents fragments, 1200 fits common mtus
 pub const MAX_PACKET: usize = 1200;
+/// unsigned asks get padded, so answers are never bigger (no amplification)
 const UNSIGNED_REQUEST_SIZE: usize = 128;
 const TAG_SIZE: usize = 32;
+/// *insert salt bae gif*
 const ACCOUNT_SECRET_LABEL: &[u8] = b"pet account v1";
 
 pub type Key = [u8; 32];
@@ -62,6 +76,7 @@ pub struct Signup {
     pub species: String,
 }
 
+/// a sync sends the revision it has, so an unchanged world isnt sent again
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Request {
     Sync { since: Option<u64> },
@@ -81,6 +96,7 @@ pub enum Reply {
         server_time: Duration,
         world: World,
     },
+    /// carries the world so wrong guesses get fixed
     Refused {
         server_time: Duration,
         world: World,
@@ -88,11 +104,22 @@ pub enum Reply {
     },
 }
 
+impl Reply {
+    pub fn world(&self) -> Option<&World> {
+        match self {
+            Reply::Synced { world, .. } => world.as_ref(),
+            Reply::Done { world, .. } | Reply::Refused { world, .. } => Some(world),
+            Reply::Registered { .. } => None,
+        }
+    }
+}
+
 pub fn encode(packet: &Packet) -> Vec<u8> {
     let body = postcard::to_stdvec(packet).expect("packets always encode");
     [&HEADER[..], &[VERSION], &body].concat()
 }
 
+/// leftover bytes mean junk, so they fail
 pub fn decode(bytes: &[u8]) -> Option<Packet> {
     if bytes.len() > MAX_PACKET {
         return None;
@@ -114,7 +141,7 @@ pub fn get_challenge(nonce: u64) -> Vec<u8> {
 
 fn padded(packet: impl Fn(Vec<u8>) -> Packet) -> Vec<u8> {
     let bare = encode(&packet(Vec::new()));
-    encode(&packet(vec![0; UNSIGNED_REQUEST_SIZE.saturating_sub(bare.len() + 1)]))
+    encode(&packet(vec![0; UNSIGNED_REQUEST_SIZE.saturating_sub(bare.len())]))
 }
 
 pub fn seal(packet: &Packet, secret: &Secret) -> Vec<u8> {
@@ -130,10 +157,12 @@ pub fn open(bytes: &[u8], secret: &Secret) -> Option<Packet> {
     decode(body)
 }
 
+/// same tag = same request
 pub fn tag(bytes: &[u8]) -> Option<&[u8]> {
     split_tag(bytes).map(|(_, tag)| tag)
 }
 
+/// find account
 pub fn unverified(bytes: &[u8]) -> Option<Packet> {
     decode(split_tag(bytes)?.0)
 }
@@ -151,6 +180,7 @@ pub fn account_secret(own: &StaticSecret, other: &PublicKey) -> Secret {
         .into()
 }
 
+/// proves the sender receives packets at specified address, trimmed to 16 bytes
 pub fn challenge(secret: &Secret, address: SocketAddr, minute: u64) -> Challenge {
     let tag = mac(secret)
         .chain_update(address.to_string())
@@ -170,6 +200,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// prevent non-ascii panic
 pub fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
     let text = text.trim();
     if text.len() != 2 * N {
@@ -212,7 +243,7 @@ mod tests {
         let sealed = seal(&packet, &[1; 32]);
         assert_eq!(open(&sealed, &[1; 32]), Some(packet));
         assert_eq!(open(&sealed, &[2; 32]), None);
-        let mut changed = sealed.clone();
+        let mut changed = sealed;
         changed[10] ^= 1;
         assert_eq!(open(&changed, &[1; 32]), None);
     }

@@ -1,3 +1,11 @@
+/*!
+pet server:
+  flags and startup
+  udp loop
+  signups and logins
+  commands and syncs
+*/
+
 mod log;
 mod store;
 
@@ -6,19 +14,21 @@ use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use log::{Level, debug, error, info, warning};
 use pet_core::pet::{self, Pet};
 use pet_core::protocol::{
     self, AccountId, Challenge, Info, MAX_PACKET, PORT, Packet, PublicKey, Reply, Request, Secret, Signup, StaticSecret,
 };
 use pet_core::world::{Command, World};
-use store::{Answer, Store};
+
+use crate::log::{Level, debug, error, info, warning};
+use crate::store::{Answer, Store};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const DEFAULT_DB: &str = "pet.db";
 const DEFAULT_NAME: &str = "pet";
 const DEFAULT_LOG: &str = "pet-server.log";
+/// prevent saving to db on every single sync (~4/sec)
 const SAVE_CAUGHT_UP_AFTER: Duration = Duration::from_secs(60);
 
 struct Server {
@@ -39,12 +49,13 @@ fn main() -> Result<()> {
         Some(level) => Level::parse(&level).ok_or_else(|| format!("unknown log level \"{level}\", use debug, info, warn or error"))?,
         None => Level::Info,
     };
-    log::start(&log_file, level).map_err(|error| format!("{}: {error}", log_file.display()))?;
+
+    log::start(&log_file, level).map_err(|error| at(&log_file, error))?;
     let server = Server {
         name: flag("--name").unwrap_or_else(|| DEFAULT_NAME.to_string()),
         key: load_key(Path::new(&key))?,
         challenge_secret: protocol::random(),
-        store: Store::open(&database).map_err(|error| format!("{}: {error}", database.display()))?,
+        store: Store::open(&database).map_err(|error| at(&database, error))?,
     };
     let socket = UdpSocket::bind(("0.0.0.0", port)).inspect_err(|problem| {
         error!("server failed to start {{ port: {port}, error: {:?} }}", problem.to_string());
@@ -52,9 +63,11 @@ fn main() -> Result<()> {
     let public = protocol::to_hex(PublicKey::from(&server.key).as_bytes());
     let accounts = server.store.accounts().unwrap_or_default();
     let shown = format!("{level:?}").to_lowercase();
+
     info!("server started {{ port: {port}, database: {database:?}, accounts: {accounts} }}");
     info!("server key {{ public: {public} }}");
     info!("logging {{ level: {shown}, file: {log_file:?} }}");
+
     let mut buffer = [0; MAX_PACKET + 1];
     loop {
         let (size, from) = match socket.recv_from(&mut buffer) {
@@ -73,9 +86,13 @@ fn main() -> Result<()> {
 }
 
 fn load_key(path: &Path) -> Result<StaticSecret> {
-    let text = std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let bytes = protocol::from_hex(&text).ok_or_else(|| format!("{}: not 64 hex characters", path.display()))?;
+    let text = std::fs::read_to_string(path).map_err(|error| at(path, error))?;
+    let bytes = protocol::from_hex(&text).ok_or_else(|| at(path, "not 64 hex characters"))?;
     Ok(StaticSecret::from(bytes))
+}
+
+fn at(path: &Path, problem: impl Display) -> String {
+    format!("{}: {problem}", path.display())
 }
 
 impl Server {
@@ -113,6 +130,7 @@ impl Server {
         Packet::Challenge { nonce, challenge }
     }
 
+    /// we trust the previous minute so time passed between send and parse doesn't invalidate the challenge
     fn challenge_fits(&self, challenge: &Challenge, from: SocketAddr) -> bool {
         let now = minute();
         [now, now.saturating_sub(1)]
@@ -121,33 +139,30 @@ impl Server {
     }
 
     fn register(&self, signup: Signup, from: SocketAddr) -> Option<Vec<u8>> {
+        let (name, species) = (signup.name.as_str(), signup.species.as_str());
         if !self.challenge_fits(&signup.challenge, from) {
-            let (name, species) = (&signup.name, &signup.species);
             debug!("signup dropped {{ from: {from}, reason: \"challenge does not fit\", name: {name:?}, species: {species:?} }}");
             return None;
         }
-        let refusal = if !pet::valid_name(&signup.name) {
+        let refusal = if !pet::valid_name(name) {
             Some("invalid name")
-        } else if !pet::SPECIES.contains(&signup.species.as_str()) {
+        } else if !pet::SPECIES.contains(&species) {
             Some("unknown species")
         } else {
             None
         };
         if let Some(refusal) = refusal {
-            let (name, species) = (&signup.name, &signup.species);
             info!("signup refused {{ from: {from}, reason: {refusal:?}, name: {name:?}, species: {species:?} }}");
             return None;
         }
+
         let account = protocol::random();
-        let now = now();
-        let world = World::new(Pet::new(&signup.name, &signup.species), now);
-        let world = logged(toml::to_string(&world), "writing a new world")?;
-        logged(
-            self.store.register(&account, &signup.public, now.as_secs() as i64, &world),
-            "storing a signup",
-        )?;
-        let (id, name, species) = (protocol::to_hex(&account), &signup.name, &signup.species);
+        let world = World::new(Pet::new(name, species), now());
+        logged(self.store.register(&account, &signup.public, &world), "storing a signup")?;
+        let id = protocol::to_hex(&account);
+
         info!("signed up {{ from: {from}, account: {id}, name: {name:?}, species: {species:?} }}");
+
         let secret = protocol::account_secret(&self.key, &PublicKey::from(signup.public));
         let reply = Packet::Reply {
             sequence: 0,
@@ -157,12 +172,12 @@ impl Server {
     }
 
     fn signed(&self, bytes: &[u8], from: SocketAddr) -> Option<Vec<u8>> {
-        let Packet::Request {
+        let Some(Packet::Request {
             account,
             challenge,
             sequence,
             request,
-        } = protocol::unverified(bytes)?
+        }) = protocol::unverified(bytes)
         else {
             debug!(
                 "packet dropped {{ from: {from}, reason: \"not a packet\", bytes: {} }}",
@@ -170,28 +185,21 @@ impl Server {
             );
             return None;
         };
+        let id = protocol::to_hex(&account);
         if !self.challenge_fits(&challenge, from) {
-            debug!(
-                "request dropped {{ from: {from}, account: {}, reason: \"challenge does not fit\" }}",
-                protocol::to_hex(&account)
-            );
+            debug!("request dropped {{ from: {from}, account: {id}, reason: \"challenge does not fit\" }}");
             return None;
         }
         let Some(public) = logged(self.store.public_key(&account), "looking up an account")? else {
-            debug!(
-                "login failed {{ from: {from}, account: {}, reason: \"no such account\" }}",
-                protocol::to_hex(&account)
-            );
+            debug!("login failed {{ from: {from}, account: {id}, reason: \"no such account\" }}");
             return None;
         };
         let secret = protocol::account_secret(&self.key, &PublicKey::from(public));
         if protocol::open(bytes, &secret).is_none() {
-            debug!(
-                "login failed {{ from: {from}, account: {}, reason: \"wrong signature\" }}",
-                protocol::to_hex(&account)
-            );
+            debug!("login failed {{ from: {from}, account: {id}, reason: \"wrong signature\" }}");
             return None;
         }
+
         match request {
             Request::Sync { since } => {
                 let reply = self.sync(&account, since, from)?;
@@ -201,6 +209,8 @@ impl Server {
         }
     }
 
+    /// stored reply first, so a retry works even after the sequence moved on.
+    /// cheats require server in dev mode, no privileged users
     fn command(
         &self,
         account: &AccountId,
@@ -227,59 +237,58 @@ impl Server {
             debug!("command dropped {{ from: {from}, account: {id}, reason: \"cheats need a dev server\" }}");
             return None;
         }
-        let stored = logged(self.store.world(account), "loading a world")?;
-        let mut world: World = logged(toml::from_str(&stored), "reading a stored world")?;
+
+        let mut world = logged(self.store.world(account), "loading a world")?;
         let now = now();
         world.catch_up(now);
-        let applied = world.apply(command, now);
-        let saved = logged(toml::to_string(&world), "writing a world")?;
-        let revision = i64::try_from(world.revision()).ok()?;
-        let reply = match applied {
+        let reply = match world.apply(command, now) {
             Ok(_) => {
+                let revision = world.revision();
                 info!("command applied {{ from: {from}, account: {id}, command: {command:?}, revision: {revision} }}");
-                Reply::Done { server_time: now, world }
+                Reply::Done {
+                    server_time: now,
+                    world: world.clone(),
+                }
             }
             Err(reason) => {
                 debug!("command refused {{ from: {from}, account: {id}, command: {command:?}, reason: {reason:?} }}");
                 Reply::Refused {
                     server_time: now,
-                    world,
+                    world: world.clone(),
                     reason,
                 }
             }
         };
+
         let sealed = protocol::seal(&Packet::Reply { sequence, reply }, secret);
         let answer = Answer { tag, reply: &sealed };
-        logged(
-            self.store
-                .save_command(account, order, revision, now.as_secs() as i64, &saved, answer),
-            "saving a command",
-        )?;
+        logged(self.store.save_command(account, order, &world, answer), "saving a command")?;
         Some(sealed)
     }
 
+    /// no sequence check, two terminals syncing at once is fine
     fn sync(&self, account: &AccountId, since: Option<u64>, from: SocketAddr) -> Option<Reply> {
-        let stored = logged(self.store.world(account), "loading a world")?;
-        let mut world: World = logged(toml::from_str(&stored), "reading a stored world")?;
+        let id = protocol::to_hex(account);
+        let mut world = logged(self.store.world(account), "loading a world")?;
         let last_seen = world.last_seen();
         let now = now();
         world.catch_up(now);
         if world.last_seen() - last_seen >= SAVE_CAUGHT_UP_AFTER {
-            let saved = logged(toml::to_string(&world), "writing a world")?;
-            let revision = i64::try_from(world.revision()).ok()?;
-            logged(
-                self.store.save_world(account, revision, now.as_secs() as i64, &saved),
-                "saving a world",
-            )?;
-            debug!("world saved {{ account: {}, revision: {revision} }}", protocol::to_hex(account));
+            logged(self.store.save_world(account, &world), "saving a world")?;
+            let revision = world.revision();
+            debug!("world saved {{ account: {id}, revision: {revision} }}");
         }
+
         let world = (since != Some(world.revision())).then_some(world);
-        let (id, sent) = (protocol::to_hex(account), world.is_some());
+        let sent = world.is_some();
+
         debug!("synced {{ from: {from}, account: {id}, since: {since:?}, world_sent: {sent} }}");
+
         Some(Reply::Synced { server_time: now, world })
     }
 }
 
+/// reply can never be bigger than request to prevent amplification
 fn unsigned(packet: Packet, request: &[u8], from: SocketAddr) -> Option<Vec<u8>> {
     let reply = protocol::encode(&packet);
     if reply.len() > request.len() {
@@ -293,6 +302,7 @@ fn unsigned(packet: Packet, request: &[u8], from: SocketAddr) -> Option<Vec<u8>>
     Some(reply)
 }
 
+/// db error drops packet, server doesnt panic
 fn logged<T>(result: std::result::Result<T, impl Display>, what: &str) -> Option<T> {
     result
         .map_err(|problem| error!("storage failed {{ during: {what:?}, error: {:?} }}", problem.to_string()))
@@ -327,10 +337,10 @@ mod tests {
         };
         let player = StaticSecret::from([3; 32]);
         let account = [4; 16];
-        let world = toml::to_string(&World::new(Pet::new("Mochi", "Cat"), now())).unwrap();
+        let world = World::new(Pet::new("Mochi", "Cat"), now());
         server
             .store
-            .register(&account, PublicKey::from(&player).as_bytes(), 0, &world)
+            .register(&account, PublicKey::from(&player).as_bytes(), &world)
             .unwrap();
         let from: SocketAddr = "127.0.0.1:5000".parse().unwrap();
         let secret = protocol::account_secret(&player, &PublicKey::from(&server.key));
@@ -348,16 +358,8 @@ mod tests {
         let first = feed(5);
         assert!(first.is_some());
         assert_eq!(feed(5), first);
-        let stored: World = toml::from_str(&server.store.world(&account).unwrap()).unwrap();
-        assert_eq!(stored.revision(), 1);
+        assert_eq!(server.store.world(&account).unwrap().revision(), 1);
         assert!(feed(4).is_none());
         assert!(feed(6).is_some());
-    }
-
-    #[test]
-    fn a_world_survives_storage() {
-        let world = World::new(Pet::new("Mochi", "Cat"), Duration::from_secs(1_759_000_000));
-        let stored = toml::to_string(&world).unwrap();
-        assert_eq!(toml::from_str::<World>(&stored).unwrap(), world);
     }
 }

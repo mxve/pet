@@ -1,3 +1,11 @@
+/*!
+world:
+  actions and commands
+  refusals
+  level ups
+  catching up
+*/
+
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -71,6 +79,10 @@ pub const ACTIONS: &[Action] = &[
     },
 ];
 
+pub fn action(key: char) -> Option<&'static Action> {
+    ACTIONS.iter().find(|action| action.key == key)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     Act(char),
@@ -80,6 +92,7 @@ pub enum Command {
     Cheat(Cheat),
 }
 
+/// cheat stuff completely excluded from release builds
 #[cfg(debug_assertions)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Cheat {
@@ -108,10 +121,11 @@ pub struct Outcome {
     pub events: Vec<Event>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct World {
     pet: Pet,
     last_seen: Duration,
+    /// bumped on change so sync can skip known
     revision: u64,
     busy_until: Duration,
 }
@@ -142,7 +156,7 @@ impl World {
         let busy = now < self.busy_until;
         let outcome = match command {
             Command::Act(key) => {
-                let action = ACTIONS.iter().find(|action| action.key == key).ok_or(Refusal::UnknownAction)?;
+                let action = action(key).ok_or(Refusal::UnknownAction)?;
                 if busy {
                     return Err(Refusal::Busy);
                 }
@@ -167,6 +181,7 @@ impl World {
         Ok(outcome)
     }
 
+    /// lets pretend time is linear
     pub fn catch_up(&mut self, now: Duration) -> Vec<Event> {
         let away = now.saturating_sub(self.last_seen);
         self.last_seen = self.last_seen.max(now);
@@ -185,6 +200,7 @@ impl World {
         }
     }
 
+    /// trigger level up on any change if needed
     fn changing(&mut self, change: impl FnOnce(&mut Pet)) -> Vec<Event> {
         let before = Levels::of(&self.pet);
         change(&mut self.pet);
@@ -223,7 +239,8 @@ fn cheated(pet: &mut Pet, cheat: Cheat) {
         Cheat::Xp => pet.earn(CHEAT_XP),
         Cheat::NextLevel => {
             let level = pet.level();
-            pet.earn((level.needed - level.into) as f32);
+            let skill = pet.tracked();
+            *pet.skills.entry(skill).or_default() += (level.needed - level.into) as f32;
         }
         Cheat::Shift(by) => pet.stats = pet.stats.shifted(by),
     }

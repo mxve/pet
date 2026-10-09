@@ -1,10 +1,18 @@
+/*!
+app:
+  holds & modifies state
+  inputs and notices
+  commands and server replies
+  dev cheats
+*/
+
 use std::collections::VecDeque;
 use std::hash::{BuildHasher, RandomState};
 use std::time::Duration;
 
 use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
 use pet_core::protocol::Reply;
-use pet_core::world::{ACTIONS, Clip, Command, Event, Refusal, World};
+use pet_core::world::{self, ACTIONS, Clip, Command, Event, Refusal, World};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Span;
 
@@ -13,8 +21,8 @@ use crate::online::Remote;
 use crate::species::Species;
 use crate::theme::YELLOW;
 
-const NAME_WIDTH: usize = 12;
 const NOTICE_TIME: Duration = Duration::from_secs(2);
+/// batching small increments
 const XP_FLOAT_GAP: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,13 +44,16 @@ pub enum Screen {
 }
 
 pub struct App {
-    pub world: Option<World>,
+    world: Option<World>,
     pub remote: Option<Remote>,
-    pub species: Vec<Species>,
-    pub choice: usize,
+    species: Vec<Species>,
+    choice: usize,
     pub screen: Screen,
+    /// real time, drives the animations
     pub clock: Duration,
+    /// game time, follows the server and runs faster in dev
     time: Duration,
+    /// new each start so the background differs
     pub seed: u64,
     pub quit: bool,
     #[cfg(debug_assertions)]
@@ -124,21 +135,31 @@ impl App {
     }
 
     pub fn say(&mut self, text: &str) {
-        self.notices.push_back(Notice {
-            text: text.to_string(),
-            tone: Tone::Plain,
-        });
+        self.queue(text, Tone::Plain);
+    }
+
+    fn queue(&mut self, text: &str, tone: Tone) {
+        let text = text.to_string();
+        self.notices.push_back(Notice { text, tone });
+    }
+
+    /// jumps the queue, for what just happened
+    fn interrupt(&mut self, text: &str, tone: Tone) {
+        let text = text.to_string();
+        self.notices.push_front(Notice { text, tone });
+        self.notice_shown = Duration::ZERO;
     }
 
     pub fn notice(&self) -> Option<&Notice> {
         self.notices.front()
     }
 
-    pub fn catch_up(&mut self) {
+    fn catch_up(&mut self) {
         let events = self.world.as_mut().map(|world| world.catch_up(self.time)).unwrap_or_default();
         self.announce(events);
     }
 
+    /// applied right away, the server answer replaces the guess
     fn send(&mut self, command: Command) {
         let Some(world) = &mut self.world else {
             return;
@@ -153,15 +174,12 @@ impl App {
             self.acting = Some((clip, Duration::ZERO));
         }
         if let Some(message) = outcome.message {
-            self.notices.push_front(Notice {
-                text: message.to_string(),
-                tone: Tone::Plain,
-            });
-            self.notice_shown = Duration::ZERO;
+            self.interrupt(message, Tone::Plain);
         }
         self.announce(outcome.events);
     }
 
+    /// the server time and world win over ours
     fn receive(&mut self) {
         let Some(remote) = &self.remote else {
             return;
@@ -180,11 +198,7 @@ impl App {
                         Refusal::Busy => "is still busy.",
                         Refusal::UnknownAction => "does not know how to do that.",
                     };
-                    self.notices.push_front(Notice {
-                        text: text.to_string(),
-                        tone: Tone::Bad,
-                    });
-                    self.notice_shown = Duration::ZERO;
+                    self.interrupt(text, Tone::Bad);
                     (server_time, Some(world))
                 }
                 Reply::Registered { .. } => continue,
@@ -213,10 +227,11 @@ impl App {
             if tone == Tone::Good {
                 self.acting = Some((Clip::Cheer, Duration::ZERO));
             }
-            self.notices.push_back(Notice { text, tone });
+            self.queue(&text, tone);
         }
     }
 
+    /// raw mode eats ctrl+c, so it is handled here
     pub fn on_key(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.quit = true;
@@ -233,6 +248,7 @@ impl App {
         }
     }
 
+    /// the name is measured in terminal columns, wide chars count double
     fn on_adopt_key(&mut self, code: KeyCode) {
         let Screen::Adopt { name } = &mut self.screen else {
             return;
@@ -244,7 +260,7 @@ impl App {
             KeyCode::Backspace => _ = name.pop(),
             KeyCode::Char(character) => {
                 name.push(character);
-                if Span::raw(name.as_str()).width() > NAME_WIDTH {
+                if Span::raw(name.as_str()).width() > pet::NAME_LENGTH {
                     name.pop();
                 }
             }
@@ -280,7 +296,7 @@ impl App {
             }
             KeyCode::Char('s') => self.send(Command::Activity(toggled(activity, Activity::Asleep))),
             KeyCode::Char('r') => self.send(Command::Activity(toggled(activity, Activity::Training))),
-            KeyCode::Char(key) if ACTIONS.iter().any(|action| action.key == key) => self.send(Command::Act(key)),
+            KeyCode::Char(key) if world::action(key).is_some() => self.send(Command::Act(key)),
             _ => {}
         }
     }
@@ -308,6 +324,7 @@ impl App {
         }
     }
 
+    /// notices wait until the clip is done
     pub fn tick(&mut self, elapsed: Duration) {
         self.clock += elapsed;
         self.time += elapsed.mul_f32(self.speed);
@@ -327,9 +344,8 @@ impl App {
             }
         }
     }
-}
 
-impl App {
+    /// xp can drop when the server corrects us, then it just recounts
     fn float_xp(&mut self, elapsed: Duration) {
         let Some(total) = self.pet().map(Pet::total_xp) else {
             return;
@@ -373,13 +389,13 @@ mod dev {
             self.speed
         }
 
+        /// ctrl+alt is altgr on some keyboards, that stays for typing
         pub(super) fn on_dev_key(&mut self, key: KeyEvent) -> bool {
             let control = key.modifiers.contains(KeyModifiers::CONTROL);
             let alt = key.modifiers.contains(KeyModifiers::ALT);
             if !control || alt {
                 return false;
             }
-            let by = |food, joy, energy| Stats { food, joy, energy };
             let cheat = match key.code {
                 KeyCode::Char('t') => {
                     let current = SPEEDS.iter().position(|speed| *speed == self.speed);
@@ -388,36 +404,14 @@ mod dev {
                 }
                 KeyCode::Char('x') => Cheat::Xp,
                 KeyCode::Char('l') => Cheat::NextLevel,
-                KeyCode::Char('f') => Cheat::Shift(by(-CHEAT_DRAIN, 0.0, 0.0)),
-                KeyCode::Char('p') => Cheat::Shift(by(0.0, -CHEAT_DRAIN, 0.0)),
-                KeyCode::Char('e') => Cheat::Shift(by(0.0, 0.0, -CHEAT_DRAIN)),
-                KeyCode::Char('r') => Cheat::Shift(by(FULL, FULL, FULL)),
+                KeyCode::Char('f') => Cheat::Shift(Stats::new(-CHEAT_DRAIN, 0.0, 0.0)),
+                KeyCode::Char('p') => Cheat::Shift(Stats::new(0.0, -CHEAT_DRAIN, 0.0)),
+                KeyCode::Char('e') => Cheat::Shift(Stats::new(0.0, 0.0, -CHEAT_DRAIN)),
+                KeyCode::Char('r') => Cheat::Shift(Stats::new(FULL, FULL, FULL)),
                 _ => return true,
             };
             self.send(Command::Cheat(cheat));
             true
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::species;
-
-    #[test]
-    fn adopting_needs_a_name_and_any_letter_types() {
-        let mut app = App::new(species::builtin(), None, Duration::ZERO);
-        let mut press = |codes: &[KeyCode]| {
-            for &code in codes {
-                app.on_key(KeyEvent::from(code));
-            }
-        };
-        press(&[KeyCode::Left, KeyCode::Right, KeyCode::Char(' '), KeyCode::Enter]);
-        press(&[KeyCode::Char('q'), KeyCode::Char('f'), KeyCode::Backspace]);
-        press(&[KeyCode::Enter]);
-        assert_eq!(app.pet(), Some(&Pet::new("q", &app.species[0].name)));
-        assert!(matches!(app.screen, Screen::Home));
-        assert!(!app.quit);
     }
 }

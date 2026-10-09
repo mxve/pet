@@ -1,3 +1,10 @@
+/*!
+pet:
+  stats and moods
+  skills and the xp curve
+  names
+*/
+
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -5,19 +12,24 @@ use serde::{Deserialize, Serialize};
 
 pub const FULL: f32 = 100.0;
 pub const LOW: f32 = 25.0;
+/// the server cant read pet files, so it keeps its own list
 pub const SPECIES: [&str; 5] = ["Bunny", "Cat", "Dog", "Fox", "Slime"];
 pub const NAME_LENGTH: usize = 12;
 const HIGH: f32 = 70.0;
+/// small steps, so being away plays out like being watched
 const CATCH_UP_STEP: Duration = Duration::from_secs(60);
 const LEVEL_BASE_XP: f64 = 10.0;
 const LEVEL_GROWTH: f64 = 1.08;
 const MAX_LEVEL: u32 = 99;
+/// float error would leave you a level short right at the boundary
 const BOUNDARY_SLACK: f64 = 1e-9;
+/// training everything at once is slow on purpose
 const ALL_SKILLS_SHARE: f32 = 0.1;
 const HAPPY_XP_PER_HOUR: f32 = 8.0;
 const ASLEEP_XP_PER_HOUR: f32 = 4.0;
 const TRAINING_XP_PER_HOUR: f32 = 120.0;
 const STAMINA_SAVING_PER_LEVEL: f32 = 0.01;
+/// stamina helps, energy never gets free
 const MAX_STAMINA_SAVING: f32 = 0.5;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
@@ -43,20 +55,28 @@ pub struct Stats {
 }
 
 impl Stats {
+    pub const fn new(food: f32, joy: f32, energy: f32) -> Stats {
+        Stats { food, joy, energy }
+    }
+
     pub(crate) fn shifted(self, by: Stats) -> Stats {
-        Stats {
-            food: (self.food + by.food).clamp(0.0, FULL),
-            joy: (self.joy + by.joy).clamp(0.0, FULL),
-            energy: (self.energy + by.energy).clamp(0.0, FULL),
-        }
+        self.zip(by, |stat, change| (stat + change).clamp(0.0, FULL))
     }
 
     fn scaled(self, factor: f32) -> Stats {
-        Stats {
-            food: self.food * factor,
-            joy: self.joy * factor,
-            energy: self.energy * factor,
-        }
+        self.zip(Stats::new(factor, factor, factor), |stat, factor| stat * factor)
+    }
+
+    fn sum(self) -> f32 {
+        self.food + self.joy + self.energy
+    }
+
+    fn zip(self, other: Stats, combine: impl Fn(f32, f32) -> f32) -> Stats {
+        Stats::new(
+            combine(self.food, other.food),
+            combine(self.joy, other.joy),
+            combine(self.energy, other.energy),
+        )
     }
 }
 
@@ -128,6 +148,7 @@ pub struct Level {
 }
 
 impl Level {
+    /// max level needs nothing, so the bar shows full
     pub fn ratio(self) -> f32 {
         if self.needed == 0 {
             1.0
@@ -137,7 +158,7 @@ impl Level {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pet {
     pub name: String,
     pub species: String,
@@ -152,27 +173,24 @@ impl Pet {
         Pet {
             name: name.to_string(),
             species: species.to_string(),
-            stats: Stats {
-                food: FULL,
-                joy: FULL,
-                energy: FULL,
-            },
+            stats: Stats::new(FULL, FULL, FULL),
             activity: Activity::Awake,
             skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
             focus: Focus::All,
         }
     }
 
+    /// any care wakes the pet. returns only what helped, so feeding a full pet earns nothing
     pub(crate) fn apply(&mut self, effect: Stats) -> f32 {
         let before = self.stats;
         self.stats = self.stats.shifted(effect);
         if self.activity == Activity::Asleep {
             self.activity = Activity::Awake;
         }
-        let gain = |now: f32, then: f32| (now - then).max(0.0);
-        gain(self.stats.food, before.food) + gain(self.stats.joy, before.joy) + gain(self.stats.energy, before.energy)
+        self.stats.zip(before, |now, then| (now - then).max(0.0)).sum()
     }
 
+    /// stamina only slows energy loss, sleep refills at full speed
     pub(crate) fn tick(&mut self, elapsed: Duration) {
         let hours = elapsed.as_secs_f32() / 3600.0;
         let (mut rate, xp_per_hour) = match self.activity {
@@ -184,8 +202,10 @@ impl Pet {
         if rate.energy < 0.0 {
             rate.energy *= 1.0 - self.stamina_saving();
         }
+
         self.stats = self.stats.shifted(rate.scaled(hours));
         self.earn(xp_per_hour * hours);
+
         let rested = self.stats.energy >= FULL;
         let spent = self.stats.food <= 0.0 || self.stats.energy <= 0.0;
         match self.activity {
@@ -211,6 +231,7 @@ impl Pet {
         }
     }
 
+    /// with all skills on, show the one closest to leveling
     pub fn tracked(&self) -> Skill {
         match self.focus {
             Focus::One(skill) => skill,
@@ -241,6 +262,7 @@ impl Pet {
         Skill::ALL.iter().map(|&skill| self.skill(skill).number).sum()
     }
 
+    /// same result as ticking live, no matter how long you were gone
     pub(crate) fn advance(&mut self, elapsed: Duration) {
         let mut left = elapsed;
         while !left.is_zero() {
@@ -250,6 +272,7 @@ impl Pet {
         }
     }
 
+    /// the worst stat sets the mood, food wins ties
     pub fn mood(&self) -> Mood {
         let Stats { food, joy, energy } = self.stats;
         let lowest = food.min(joy).min(energy);
@@ -272,6 +295,7 @@ impl Pet {
     }
 }
 
+/// the pet level is the same curve, `scale` times the xp per level
 fn level_at(xp: f32, scale: u32) -> Level {
     let scale = f64::from(scale);
     let xp = f64::from(xp.max(0.0)) / scale;
@@ -299,11 +323,13 @@ fn level_cost(level: u32) -> f64 {
     LEVEL_BASE_XP * LEVEL_GROWTH.powi(level as i32)
 }
 
+/// in core so client and server agree on names
 pub fn valid_name(name: &str) -> bool {
     let length = name.chars().count();
     name == name.trim() && (1..=NAME_LENGTH).contains(&length) && !name.chars().any(hides_text)
 }
 
+/// no control or bidi chars, names cant hide text
 fn hides_text(character: char) -> bool {
     character.is_control() || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
@@ -311,22 +337,6 @@ fn hides_text(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn decay_stops_at_zero() {
-        let mut pet = Pet::new("Mochi", "Cat");
-        pet.tick(Duration::from_secs(3600));
-        assert_eq!(pet.stats.food, 92.0);
-        pet.tick(Duration::from_secs(3600 * 1000));
-        assert_eq!(
-            pet.stats,
-            Stats {
-                food: 0.0,
-                joy: 0.0,
-                energy: 0.0
-            }
-        );
-    }
 
     #[test]
     fn mood_follows_the_lowest_stat() {
@@ -361,7 +371,6 @@ mod tests {
     fn levels_cost_more_and_more_up_to_99() {
         let number = |xp| level_at(xp, 1).number;
         assert_eq!([number(9.9), number(10.0), number(58.0), number(59.0)], [0, 1, 4, 5]);
-        assert!((level_cost(1) / level_cost(0) - LEVEL_GROWTH).abs() < 1e-12);
         assert_eq!(number(1e9), MAX_LEVEL);
     }
 

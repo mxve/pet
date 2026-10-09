@@ -1,10 +1,15 @@
+/*!
+bars:
+  custom progress bars
+*/
+
 use std::time::Duration;
 
+use pet_core::random::roll;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 
 use crate::theme::{self, LAVENDER, MUTED, PINK, TEXT};
-use pet_core::random::roll;
 
 const SPARKLES: &[&str] = &["₊", ".", "⋆", "+", "✧"];
 const SMALL_SPARKLES: &[&str] = &["·", "·", "·", "·", "·", "₊", "."];
@@ -58,6 +63,7 @@ impl Bar {
             .collect()
     }
 
+    /// cells twinkle out of step, so it doesnt look like a wave
     fn sparkle(&self, cell: usize, width: usize, clock: Duration) -> Span<'static> {
         let period = TWINKLE.as_millis();
         let offset = u128::from(roll((self.name, "offset", cell))) % period;
@@ -73,6 +79,7 @@ impl Bar {
     }
 }
 
+/// anything above zero shows at least one cell
 fn filled_cells(ratio: f32, width: usize) -> usize {
     if ratio <= 0.0 {
         0

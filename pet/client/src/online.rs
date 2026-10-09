@@ -1,3 +1,11 @@
+/*!
+online:
+  ping and sign up
+  sync thread
+  retries
+*/
+
+use std::io::ErrorKind;
 use std::net::UdpSocket;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
@@ -15,8 +23,10 @@ const SERVER: Option<&str> = option_env!("PET_SERVER");
 const SERVER_KEY: Option<&str> = option_env!("PET_SERVER_KEY");
 const TIMEOUT: Duration = Duration::from_secs(2);
 const SYNC_EVERY: Duration = Duration::from_millis(250);
+/// the server accepts a challenge for at least a minute
 const CHALLENGE_LIFE: Duration = Duration::from_secs(60);
 const RETRY_AFTER: Duration = Duration::from_secs(2);
+/// udp can be funky, one lost packet shouldnt cost a whole retry
 const SECOND_COPY_AFTER: Duration = Duration::from_millis(30);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -64,9 +74,11 @@ pub fn follow(account: &Account) -> Result<Option<Remote>> {
     if SERVER_KEY.is_none() {
         return Ok(None);
     }
+
     let id = protocol::from_hex(&account.id).ok_or("account.toml: the id is not 32 hex characters")?;
     let private = protocol::from_hex(&account.key).ok_or("account.toml: the key is not 64 hex characters")?;
     let secret = protocol::account_secret(&StaticSecret::from(private), &PublicKey::from(server_key()?));
+
     let address = account.server.clone();
     let (reply_sender, replies) = mpsc::channel();
     let (commands, command_receiver) = mpsc::channel();
@@ -79,6 +91,7 @@ fn server_key() -> Result<Key> {
     Ok(protocol::from_hex(key).ok_or("PET_SERVER_KEY is not 64 hex characters")?)
 }
 
+/// sequence follows clock, restarted client never reuses a sequence. after a failure the whole world is fetched again
 fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, commands: &Receiver<Command>, replies: &Sender<Reply>) {
     let mut since = None;
     let mut sequence = 0;
@@ -107,6 +120,7 @@ fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, commands: &R
                 },
             };
             let sealed = protocol::seal(&request, secret);
+
             let answer = if commanding {
                 server.insist(sequence, &sealed, secret)
             } else {
@@ -116,12 +130,14 @@ fn keep_in_sync(address: &str, account: AccountId, secret: &Secret, commands: &R
                 since = None;
                 break;
             };
-            if let Reply::Synced { world: Some(world), .. } | Reply::Done { world, .. } | Reply::Refused { world, .. } = &reply {
+
+            if let Some(world) = reply.world() {
                 since = Some(world.revision());
             }
             if replies.send(reply).is_err() {
                 return;
             }
+
             match commands.recv_timeout(SYNC_EVERY.saturating_sub(asked.elapsed())) {
                 Ok(next) => command = Some(next),
                 Err(RecvTimeoutError::Timeout) => {}
@@ -166,10 +182,12 @@ impl Server {
             name: name.to_string(),
             species: species.to_string(),
         })))?;
+
         let secret = protocol::account_secret(&private, &PublicKey::from(key));
         let Reply::Registered { account } = self.reply(0, &secret)? else {
             return Err(self.problem("answered something other than the signup"));
         };
+
         Ok(Account {
             server: self.address.clone(),
             id: protocol::to_hex(&account),
@@ -216,11 +234,13 @@ impl Server {
 
     fn receive_bytes(&self) -> Result<Vec<u8>> {
         let mut buffer = [0; MAX_PACKET + 1];
-        let size = self
-            .socket
-            .recv(&mut buffer)
-            .map_err(|error| self.problem(&format!("did not answer ({error})")))?;
-        Ok(buffer[..size].to_vec())
+        loop {
+            match self.socket.recv(&mut buffer) {
+                Ok(size) => return Ok(buffer[..size].to_vec()),
+                Err(error) if matches!(error.kind(), ErrorKind::ConnectionReset | ErrorKind::ConnectionRefused) => {}
+                Err(error) => return Err(self.problem(&format!("did not answer ({error})"))),
+            }
+        }
     }
 
     fn problem(&self, what: &str) -> Box<dyn std::error::Error> {

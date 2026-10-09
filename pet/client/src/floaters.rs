@@ -1,3 +1,8 @@
+/*!
+floaters:
+  numbers that float up and fade
+*/
+
 use std::time::Duration;
 
 use ratatui::Frame;

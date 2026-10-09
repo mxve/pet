@@ -1,3 +1,10 @@
+/*!
+log:
+  to stderr and a file
+  levels
+  utc timestamps
+*/
+
 use std::fmt::{self, Arguments};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Write};
@@ -72,7 +79,8 @@ pub fn write(level: Level, message: Arguments) {
     if level < logger.level {
         return;
     }
-    let time = timestamp(SystemTime::now());
+
+    let time = Timestamp::now();
     if logger.colored {
         eprintln!("{GRAY}{time}{RESET} {}{}{RESET} {message}", level.color(), level.name());
     } else {
@@ -83,17 +91,19 @@ pub fn write(level: Level, message: Arguments) {
     }
 }
 
-fn timestamp(time: SystemTime) -> Timestamp {
-    let since = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    Timestamp {
-        seconds: since.as_secs() as i64,
-        millis: since.subsec_millis(),
-    }
-}
-
 struct Timestamp {
     seconds: i64,
     millis: u32,
+}
+
+impl Timestamp {
+    fn now() -> Timestamp {
+        let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        Timestamp {
+            seconds: since.as_secs() as i64,
+            millis: since.subsec_millis(),
+        }
+    }
 }
 
 impl fmt::Display for Timestamp {
@@ -109,6 +119,8 @@ impl fmt::Display for Timestamp {
     }
 }
 
+/// i totally wrote this myself and didnt steal it from
+/// https://howardhinnant.github.io/date_algorithms.html#civil_from_days
 fn civil_date(days: i64) -> (i64, i64, i64) {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);

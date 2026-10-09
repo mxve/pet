@@ -15,7 +15,8 @@ pub const LOW: f32 = 25.0;
 /// the server cant read pet files, so it keeps its own list
 pub const SPECIES: [&str; 5] = ["Bunny", "Cat", "Dog", "Fox", "Slime"];
 pub const NAME_LENGTH: usize = 12;
-const HIGH: f32 = 70.0;
+/// full pet stays happy for ~5h
+const HIGH: f32 = 60.0;
 /// small steps, so being away plays out like being watched
 const CATCH_UP_STEP: Duration = Duration::from_secs(60);
 const LEVEL_BASE_XP: f64 = 10.0;
@@ -206,12 +207,9 @@ impl Pet {
         self.stats = self.stats.shifted(rate.scaled(hours));
         self.earn(xp_per_hour * hours);
 
-        let rested = self.stats.energy >= FULL;
         let spent = self.stats.food <= 0.0 || self.stats.energy <= 0.0;
-        match self.activity {
-            Activity::Asleep if rested => self.activity = Activity::Awake,
-            Activity::Training if spent => self.activity = Activity::Awake,
-            Activity::Awake | Activity::Asleep | Activity::Training => {}
+        if self.activity == Activity::Training && spent {
+            self.activity = Activity::Awake;
         }
     }
 
@@ -355,16 +353,16 @@ mod tests {
     }
 
     #[test]
-    fn sleeping_restores_energy_then_wakes() {
+    fn sleeping_restores_energy_and_stays_asleep() {
         let mut pet = Pet::new("Mochi", "Cat");
         pet.stats.energy = 10.0;
         pet.activity = Activity::Asleep;
         pet.tick(Duration::from_secs(3600));
         assert_eq!(pet.stats.energy, 35.0);
         assert_eq!(pet.mood(), Mood::Asleep);
-        pet.tick(Duration::from_secs(3600 * 3));
+        pet.advance(Duration::from_secs(3600 * 10));
         assert_eq!(pet.stats.energy, FULL);
-        assert_eq!(pet.activity, Activity::Awake);
+        assert_eq!(pet.activity, Activity::Asleep);
     }
 
     #[test]
@@ -441,6 +439,6 @@ mod tests {
             ticked.tick(Duration::from_secs(60));
         }
         assert_eq!(caught_up, ticked);
-        assert_eq!(caught_up.activity, Activity::Awake);
+        assert_eq!(caught_up.activity, Activity::Asleep);
     }
 }

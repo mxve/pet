@@ -38,6 +38,7 @@ pub struct Action {
     pub effect: Stats,
     pub message: &'static str,
     pub busy: Duration,
+    pub bond: f32,
 }
 
 pub const ACTIONS: &[Action] = &[
@@ -52,6 +53,7 @@ pub const ACTIONS: &[Action] = &[
         },
         message: "munches happily.",
         busy: ACTION_TIME,
+        bond: 1.0,
     },
     Action {
         key: 'p',
@@ -64,6 +66,7 @@ pub const ACTIONS: &[Action] = &[
         },
         message: "loves the attention.",
         busy: ACTION_TIME,
+        bond: 4.0,
     },
     Action {
         key: 'y',
@@ -76,6 +79,7 @@ pub const ACTIONS: &[Action] = &[
         },
         message: "bounces around.",
         busy: ACTION_TIME,
+        bond: 1.0,
     },
 ];
 
@@ -125,6 +129,7 @@ pub struct Outcome {
 pub struct World {
     pet: Pet,
     last_seen: Duration,
+    last_interaction: Duration,
     /// bumped on change so sync can skip known
     revision: u64,
     busy_until: Duration,
@@ -135,6 +140,7 @@ impl World {
         World {
             pet,
             last_seen: now,
+            last_interaction: now,
             revision: 0,
             busy_until: Duration::ZERO,
         }
@@ -162,7 +168,7 @@ impl World {
                 }
                 self.busy_until = now + action.busy;
                 let events = self.changing(|pet| {
-                    let points = pet.apply(action.effect);
+                    let points = pet.apply(action.effect, action.bond);
                     pet.earn(points / POINTS_PER_XP);
                 });
                 Outcome {
@@ -177,6 +183,7 @@ impl World {
             #[cfg(debug_assertions)]
             Command::Cheat(cheat) => self.quietly(|pet| cheated(pet, cheat)),
         };
+        self.last_interaction = now;
         self.revision += 1;
         Ok(outcome)
     }
@@ -184,9 +191,10 @@ impl World {
     /// lets pretend time is linear
     pub fn catch_up(&mut self, now: Duration) -> Vec<Event> {
         let away = now.saturating_sub(self.last_seen);
+        let idle = self.last_seen.saturating_sub(self.last_interaction);
         self.last_seen = self.last_seen.max(now);
         let was_training = self.pet.activity == Activity::Training;
-        let mut events = self.changing(|pet| pet.advance(away));
+        let mut events = self.changing(|pet| pet.advance(away, idle));
         if was_training && self.pet.activity != Activity::Training {
             events.push(Event::TrainingEnded);
         }
@@ -261,15 +269,20 @@ mod tests {
     }
 
     #[test]
-    fn only_care_that_helps_earns_xp() {
+    fn care_earns_only_what_helped() {
         let mut world = World::new(Pet::new("Mochi", "Cat"), Duration::ZERO);
         world.pet.focus = Focus::One(Skill::Hitpoints);
         world.pet.stats.food = 0.0;
         world.apply(Command::Act('f'), Duration::ZERO).unwrap();
-        assert_eq!(world.pet.xp(Skill::Hitpoints), 12.0);
+        let earned = world.pet.xp(Skill::Hitpoints);
+        assert!((earned - 12.4).abs() < 0.001);
         world.pet.stats.food = 100.0;
-        world.apply(Command::Act('f'), 3 * SECOND).unwrap();
-        assert_eq!(world.pet.xp(Skill::Hitpoints), 12.0);
+        world.apply(Command::Act('p'), 3 * SECOND).unwrap();
+        assert!(world.pet.xp(Skill::Hitpoints) > earned);
+        let earned = world.pet.xp(Skill::Hitpoints);
+        world.pet.attachment = 100.0;
+        world.apply(Command::Act('f'), 6 * SECOND).unwrap();
+        assert_eq!(world.pet.xp(Skill::Hitpoints), earned);
     }
 
     #[test]

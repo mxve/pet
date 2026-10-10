@@ -32,6 +32,10 @@ const TRAINING_XP_PER_HOUR: f32 = 120.0;
 const STAMINA_SAVING_PER_LEVEL: f32 = 0.01;
 /// stamina helps, energy never gets free
 const MAX_STAMINA_SAVING: f32 = 0.5;
+const ATTACHMENT_START: f32 = 50.0;
+const ATTACHMENT_SWAY: f32 = 0.1;
+const ATTACHMENT_GRACE: Duration = Duration::from_secs(24 * 3600);
+const ATTACHMENT_LOSS_PER_HOUR_PER_DAY: f32 = 0.5;
 const AWAKE_RATE_PER_HOUR: Stats = Stats {
     food: -8.0,
     joy: -6.0,
@@ -66,6 +70,10 @@ impl Stats {
 
     fn scaled(self, factor: f32) -> Stats {
         self.zip(Stats::new(factor, factor, factor), |stat, factor| stat * factor)
+    }
+
+    fn map(self, change: impl Fn(f32) -> f32) -> Stats {
+        Stats::new(change(self.food), change(self.joy), change(self.energy))
     }
 
     fn sum(self) -> f32 {
@@ -167,6 +175,7 @@ pub struct Pet {
     pub activity: Activity,
     pub skills: BTreeMap<Skill, f32>,
     pub focus: Focus,
+    pub attachment: f32,
 }
 
 impl Pet {
@@ -178,17 +187,34 @@ impl Pet {
             activity: Activity::Awake,
             skills: BTreeMap::from(Skill::ALL.map(|skill| (skill, 0.0))),
             focus: Focus::All,
+            attachment: ATTACHMENT_START,
         }
     }
 
     /// any care wakes the pet. returns only what helped, so feeding a full pet earns nothing
-    pub(crate) fn apply(&mut self, effect: Stats) -> f32 {
+    pub(crate) fn apply(&mut self, effect: Stats, bond: f32) -> f32 {
         let before = self.stats;
-        self.stats = self.stats.shifted(effect);
+        let attachment = self.attachment;
+        let strength = 1.0 + self.attachment_sway();
+        self.stats = self
+            .stats
+            .shifted(effect.map(|change| if change > 0.0 { change * strength } else { change }));
+        self.attachment = (self.attachment + bond).clamp(0.0, FULL);
         if self.activity == Activity::Asleep {
             self.activity = Activity::Awake;
         }
-        self.stats.zip(before, |now, then| (now - then).max(0.0)).sum()
+        let helped = self.stats.zip(before, |now, then| (now - then).max(0.0)).sum();
+        helped + (self.attachment - attachment).max(0.0)
+    }
+
+    fn attachment_sway(&self) -> f32 {
+        (self.attachment - ATTACHMENT_START) / ATTACHMENT_START * ATTACHMENT_SWAY
+    }
+
+    fn lose_attachment(&mut self, elapsed: Duration, idle: Duration) {
+        let days_past = idle.saturating_sub(ATTACHMENT_GRACE).as_secs_f32() / 86400.0;
+        let loss_per_hour = ATTACHMENT_LOSS_PER_HOUR_PER_DAY * days_past;
+        self.attachment = (self.attachment - loss_per_hour * elapsed.as_secs_f32() / 3600.0).max(0.0);
     }
 
     /// stamina only slows energy loss, sleep refills at full speed
@@ -200,6 +226,8 @@ impl Pet {
             Activity::Asleep => (ASLEEP_RATE_PER_HOUR, ASLEEP_XP_PER_HOUR),
             Activity::Training => (TRAINING_RATE_PER_HOUR, TRAINING_XP_PER_HOUR),
         };
+        let drain = 1.0 - self.attachment_sway();
+        rate = rate.map(|change| if change < 0.0 { change * drain } else { change });
         if rate.energy < 0.0 {
             rate.energy *= 1.0 - self.stamina_saving();
         }
@@ -261,11 +289,14 @@ impl Pet {
     }
 
     /// same result as ticking live, no matter how long you were gone
-    pub(crate) fn advance(&mut self, elapsed: Duration) {
+    pub(crate) fn advance(&mut self, elapsed: Duration, idle: Duration) {
         let mut left = elapsed;
+        let mut idle = idle;
         while !left.is_zero() {
             let step = left.min(CATCH_UP_STEP);
+            idle += step;
             self.tick(step);
+            self.lose_attachment(step, idle);
             left -= step;
         }
     }
@@ -360,7 +391,7 @@ mod tests {
         pet.tick(Duration::from_secs(3600));
         assert_eq!(pet.stats.energy, 35.0);
         assert_eq!(pet.mood(), Mood::Asleep);
-        pet.advance(Duration::from_secs(3600 * 10));
+        pet.advance(Duration::from_secs(3600 * 10), Duration::ZERO);
         assert_eq!(pet.stats.energy, FULL);
         assert_eq!(pet.activity, Activity::Asleep);
     }
@@ -393,7 +424,7 @@ mod tests {
         pet.tick(Duration::from_secs(3600));
         assert_eq!(pet.xp(Skill::Hitpoints), 120.0);
         assert_eq!((pet.stats.food, pet.stats.energy), (80.0, 60.0));
-        pet.advance(Duration::from_secs(10 * 3600));
+        pet.advance(Duration::from_secs(10 * 3600), Duration::ZERO);
         assert_eq!(pet.activity, Activity::Awake);
         assert_eq!(pet.stats.energy, 0.0);
         assert!(pet.xp(Skill::Hitpoints) < 320.0);
@@ -433,12 +464,36 @@ mod tests {
             pet
         };
         let mut caught_up = tired();
-        caught_up.advance(Duration::from_secs(10 * 3600));
+        caught_up.advance(Duration::from_secs(10 * 3600), Duration::ZERO);
         let mut ticked = tired();
         for _ in 0..600 {
             ticked.tick(Duration::from_secs(60));
         }
         assert_eq!(caught_up, ticked);
         assert_eq!(caught_up.activity, Activity::Asleep);
+    }
+
+    #[test]
+    fn attachment_fades_after_a_day() {
+        let day = Duration::from_secs(24 * 3600);
+        let mut pet = Pet::new("Mochi", "Cat");
+        pet.advance(day, Duration::ZERO);
+        assert_eq!(pet.attachment, ATTACHMENT_START);
+        pet.advance(day, day);
+        let second = ATTACHMENT_START - pet.attachment;
+        pet.advance(day, 2 * day);
+        let third = ATTACHMENT_START - second - pet.attachment;
+        assert!(third > second);
+    }
+
+    #[test]
+    fn attachment_slows_draining() {
+        let mut close = Pet::new("Mochi", "Cat");
+        close.attachment = FULL;
+        let mut distant = close.clone();
+        distant.attachment = 0.0;
+        close.tick(Duration::from_secs(3600));
+        distant.tick(Duration::from_secs(3600));
+        assert!(close.stats.food > distant.stats.food);
     }
 }

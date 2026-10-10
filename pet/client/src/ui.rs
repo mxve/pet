@@ -8,7 +8,7 @@ ui:
 
 use std::time::Duration;
 
-use pet_core::pet::{self, Activity, Focus, Mood, Pet, Skill};
+use pet_core::pet::{self, Activity, FULL, Focus, Mood, Pet, Skill};
 use pet_core::random::roll;
 use pet_core::world::Clip;
 use ratatui::Frame;
@@ -216,6 +216,7 @@ fn draw_skills(frame: &mut Frame, app: &App, choice: usize) -> Vec<(Rect, Click)
             .map(|(index, row)| (*row, Click::Skill(index))),
     );
 
+    draw_attachment_row(frame, app.clock, pet, rows[Skill::ALL.len() + 1]);
     let total = Line::styled(format!("Total level {}", pet.total_level()), MUTED);
     frame.render_widget(total.centered(), rows[SKILL_ROWS - 1]);
     clickable
@@ -236,6 +237,24 @@ fn draw_skill_row(frame: &mut Frame, clock: Duration, pet: &Pet, skill: Skill, c
     frame.render_widget(Line::styled(level.number.to_string(), TEXT), number);
     frame.render_widget(Bar::new(skill.name(), level.ratio()).small().line(track.width, clock), track);
     frame.render_widget(numbers.right_aligned(), xp);
+}
+
+fn draw_attachment_row(frame: &mut Frame, clock: Duration, pet: &Pet, row: Rect) {
+    let [name, number, track, value] = Layout::horizontal([
+        Constraint::Length(SKILL_NAME_WIDTH),
+        Constraint::Length(SKILL_LEVEL_WIDTH),
+        Constraint::Fill(1),
+        Constraint::Length(SKILL_XP_WIDTH),
+    ])
+    .areas(row);
+    frame.render_widget(Line::styled("  Attachment", TEXT), name);
+    frame.render_widget(Line::styled("", TEXT), number);
+    frame.render_widget(
+        Bar::new("Attachment", pet.attachment / FULL).small().line(track.width, clock),
+        track,
+    );
+    let percent = Line::styled(format!(" {:.0}/{FULL:.0}", pet.attachment), MUTED);
+    frame.render_widget(percent.right_aligned(), value);
 }
 
 fn choice_label(name: &'static str, chosen: bool, focused: bool) -> Line<'static> {
